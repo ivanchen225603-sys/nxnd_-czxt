@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>CarPointCloudWebApi-LocalDevelopment</UserSecretsId>
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**;publish-clean\**;.local-deploy\**;TestResults\**;logs\**;.uploads\**;.trae\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DM.DmProvider" Version="8.3.1.47463" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.2" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests\**" />
+    <Content Remove="tests\**;publish\**;.local-deploy\**;TestResults\**;logs\**;.uploads\**;.trae\**" />
+    <None Remove="tests\**;publish\**;.local-deploy\**;TestResults\**;logs\**;.uploads\**;.trae\**" />
+    <EmbeddedResource Remove="tests\**" />
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+</Project>

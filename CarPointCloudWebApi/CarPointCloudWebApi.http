@@ -1,0 +1,149 @@
+@CarPointCloudWebApi_HostAddress = http://localhost:5031
+@IdempotencyKey = pointcloud-demo-001
+@Timestamp = replace-with-current-unix-milliseconds
+@Signature = replace-with-lowercase-md5-of-timestamp-plus-secret
+@Cursor = paste-X-Next-Cursor-from-previous-response
+
+# 所有受保护接口都需要 Timestamp 与 Signature。
+# PowerShell 生成示例（密钥从环境变量读取，不要写入本文件）：
+# $ts=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(); $md5=[Security.Cryptography.MD5]::Create(); $sig=[Convert]::ToHexString($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($ts+$env:INTEGRATION_APP_SECRET))).ToLowerInvariant()
+
+### Query latest vehicle dimensions
+GET {{CarPointCloudWebApi_HostAddress}}/api/v1/vehicleDimensions?limit=10
+Accept: application/json
+Timestamp: {{Timestamp}}
+Signature: {{Signature}}
+
+### Continue vehicle dimensions with an opaque cursor (do not combine with limit/timeWindow)
+GET {{CarPointCloudWebApi_HostAddress}}/api/v1/vehicleDimensions?cursor={{Cursor}}
+Accept: application/json
+Timestamp: {{Timestamp}}
+Signature: {{Signature}}
+
+### Query coal volumes by recent time window
+GET {{CarPointCloudWebApi_HostAddress}}/api/v1/coalVolumes?timeWindow=30
+Accept: application/json
+Timestamp: {{Timestamp}}
+Signature: {{Signature}}
+
+### Fetch license plate from partner system
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/licensePlateRecords/fetch?cameraIdentifier=CAMERA_001
+Accept: application/json
+Timestamp: {{Timestamp}}
+Signature: {{Signature}}
+
+### Ingest point cloud vehicle dimensions
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/internal/pointcloud/vehicleDimensions
+Content-Type: application/json
+Idempotency-Key: {{IdempotencyKey}}
+Timestamp: {{Timestamp}}
+Signature: {{Signature}}
+
+{
+  "cameraIdentifier": "CAMERA_001",
+  "licensePlate": "JING_A12345",
+  "detectStatus": "success",
+  "dimensions": {
+    "cabToTrailerFrontDist": 132.24,
+    "trailerLength": 960.04,
+    "trailerWidth": 255.0,
+    "trailerBodyHeight": 180.36,
+    "trailerBottomToGroundHeight": 120.0,
+    "highLowPlateHeight": 30.0
+  },
+  "highLowPlates": [
+    { "plateId": 1, "highestToGround": 220.0, "lowestToGround": 190.0 }
+  ],
+  "ribs": [
+    { "ribId": 1, "distToPrev": 50.0 },
+    { "ribId": 2, "distToPrev": 52.4 }
+  ],
+  "wires": [
+    { "wireId": 1, "distToPrev": 40.0 },
+    { "wireId": 2, "distToPrev": 42.8 }
+  ],
+  "sourceFile": "D:\\data\\pointcloud\\CAMERA_001.pcd",
+  "resultJsonPath": "D:\\data\\pointcloud\\CAMERA_001.json",
+  "resultImagePath": "D:\\data\\pointcloud\\CAMERA_001.png"
+}
+
+### Anonymous internal radar arrival; event_id is optional but recommended for safe retries
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/radar/vehicle-arrival
+Content-Type: application/json
+Idempotency-Key: radar-arrival-demo-001
+
+{
+  "device_id": "RADAR_001",
+  "cameraIdentifier": "CAM004",
+  "timestamp": "2026-08-01 12:00:00",
+  "event_type": "ARRIVAL",
+  "event_id": "radar-arrival-demo-001"
+}
+
+### Ingest coal volume
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/internal/pointcloud/coalVolumes
+Content-Type: application/json
+Idempotency-Key: coal-demo-001
+Timestamp: {{Timestamp}}
+Signature: {{Signature}}
+
+{
+  "cameraIdentifier": "CAMERA_001",
+  "licensePlate": "JING_A12345",
+  "volume": 36.86,
+  "unit": "m3",
+  "status": "success",
+  "confidence": 0.92,
+  "sourceFile": "D:\\data\\pointcloud\\loaded.pcd",
+  "baselineFile": "D:\\data\\pointcloud\\empty.pcd"
+}
+
+### 磅房实时点云：雷达与预览状态（需 admin/viewer 的 JWT）
+GET {{CarPointCloudWebApi_HostAddress}}/api/v1/radar-live/status
+Authorization: Bearer {{JwtToken}}
+
+### 磅房实时点云：拉取比 0 号更新的一帧融合预览
+# 响应中的 points 是 base64(Float32 小端 xyz 交错)，前 pointCountA 个点来自 CAM_004。
+# updated=false 表示没有新画面，不是错误。
+GET {{CarPointCloudWebApi_HostAddress}}/api/v1/radar-live/fused-frame?afterVersion=0
+Authorization: Bearer {{JwtToken}}
+
+### 磅房实时点云：保存 PCD 并计算（仅 admin）
+# 车牌由操作员输入并绑定到本次流程；命中已有空车档案时先返回 409，
+# 需确认后带 confirmOverwriteEmptyProfile=true 重试。
+# Idempotency-Key 必填：请求超时时无法判断 Worker 是否已受理，
+# 换个新键重试会再采一次、再写一条来车与尺寸记录。重放时响应 duplicate=true。
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/radar-live/captures
+Content-Type: application/json
+Authorization: Bearer {{JwtToken}}
+Idempotency-Key: live-20260905-0001
+
+{
+  "licensePlate": "宁A10333F",
+  "confirmOverwriteEmptyProfile": false,
+  "note": "磅房人工采集"
+}
+
+### 磅房实时点云：人工核实后强制重发
+# 仅在上一次返回 409 needs_manual_confirmation 时使用。
+# 服务端无法核实上一次是否已经采集（Worker 可能重启过），必须由操作员到现场确认
+# 本车确实没有采过，再用同一个幂等键带 forceRedispatch 重发。
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/radar-live/captures
+Content-Type: application/json
+Authorization: Bearer {{JwtToken}}
+Idempotency-Key: live-20260905-0001
+
+{
+  "licensePlate": "宁A10333F",
+  "forceRedispatch": true
+}
+
+### 磅房实时点云：查询采集进度
+# stage 只有 completed 才代表 DM8 已落库；captured/saved/analyzing 都不是。
+GET {{CarPointCloudWebApi_HostAddress}}/api/v1/radar-live/captures/sess_20260905140000000_0123456789ab
+Authorization: Bearer {{JwtToken}}
+
+### 磅房实时点云：取消当前采集（仅 admin）
+# 归属校验由 Worker 在协调器锁内完成；当前会话不属于该流程时返回 409 request_mismatch。
+POST {{CarPointCloudWebApi_HostAddress}}/api/v1/radar-live/captures/sess_20260905140000000_0123456789ab/cancel
+Authorization: Bearer {{JwtToken}}

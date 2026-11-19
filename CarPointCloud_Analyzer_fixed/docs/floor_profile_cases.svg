@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="842" viewBox="0 0 680 842" role="img">
+<title>车厢底板四种剖面情况的测量定义</title>
+<desc>情况一平整底板只记录底板离地高度；情况二为接近九十度台阶，三段测量点分别取台阶高点、后段中点、车厢后壁；情况三为坡道台阶，先把垂直边落在坡道末端等效成台阶，再按情况二量后两段；情况四整个底板为坡度，等分三段各建直角三角形，顶点取每段高端。所有高度均以真实地面为基准。</desc>
+<style>
+.th{font:500 14px system-ui,"Microsoft YaHei",sans-serif;fill:#24292f}
+.ts{font:400 12px system-ui,"Microsoft YaHei",sans-serif;fill:#57606a}
+.st{stroke:#24292f;stroke-width:2.5;fill:none}
+.dm{stroke:#57606a;stroke-width:1.2;fill:none}
+.gd{stroke:#57606a;stroke-width:1.5;fill:none}
+.ht{stroke:#8c959f;stroke-width:1;fill:none}
+.eq{stroke:#57606a;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+.pt{fill:#24292f}
+.ra{stroke:#24292f;stroke-width:1.2;fill:none}
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="0" y="0" width="680" height="842" fill="#ffffff"/>
+
+<text class="th" x="40" y="26">情况 1 — 底板平整，只记录底板离地高度</text>
+<text class="ts" x="95" y="48" text-anchor="middle">前壁</text>
+<path class="st" d="M95 56L95 96M95 96L600 96"/>
+<path class="gd" d="M60 146L620 146"/>
+<path class="ht" d="M75 146L67 154M135 146L127 154M195 146L187 154M255 146L247 154M315 146L307 154M375 146L367 154M435 146L427 154M495 146L487 154M555 146L547 154M615 146L607 154"/>
+<text class="ts" x="60" y="167">真实地面</text>
+<path class="dm" d="M347 96L347 146" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="355" y="125">H 底板离地高度</text>
+
+<text class="th" x="40" y="195">情况 2 — 落差接近 90°，测量点取每段末端</text>
+<text class="ts" x="95" y="217" text-anchor="middle">前壁</text>
+<path class="st" d="M95 225L95 255M95 255L250 255M250 255L250 295M250 295L600 295"/>
+<path class="gd" d="M60 335L620 335"/>
+<path class="ht" d="M75 335L67 343M135 335L127 343M195 335L187 343M255 335L247 343M315 335L307 343M375 335L367 343M435 335L427 343M495 335L487 343M555 335L547 343M615 335L607 343"/>
+<text class="ts" x="60" y="356">真实地面</text>
+<circle class="pt" cx="250" cy="255" r="4"/><circle class="pt" cx="425" cy="295" r="4"/><circle class="pt" cx="600" cy="295" r="4"/>
+<text class="ts" x="258" y="249">P1 台阶高点</text>
+<text class="ts" x="433" y="289">P2 后段中点</text>
+<text class="ts" x="592" y="289" text-anchor="end">P3 车厢后壁</text>
+<path class="dm" d="M250 255L250 335" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="258" y="318">H1</text>
+<path class="dm" d="M425 295L425 335" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="433" y="320">H2</text>
+<path class="dm" d="M600 295L600 335" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="592" y="320" text-anchor="end">H3</text>
+<path class="dm" d="M95 369L250 369" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="172" y="364" text-anchor="middle">L1</text>
+<path class="dm" d="M250 369L425 369" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="337" y="364" text-anchor="middle">L2</text>
+<path class="dm" d="M425 369L600 369" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="512" y="364" text-anchor="middle">L3</text>
+
+<text class="th" x="40" y="410">情况 3 — 坡道先等效成台阶，垂直边落在坡道末端</text>
+<polygon points="210,470 310,470 310,510" fill="#eaeef2"/>
+<path class="st" d="M95 440L95 470M95 470L210 470M210 470L310 510M310 510L600 510"/>
+<path class="eq" d="M210 470L310 470M310 470L310 510"/>
+<rect class="ra" x="302" y="470" width="8" height="8"/>
+<text class="ts" x="205" y="464" text-anchor="end">实际坡道</text>
+<path class="gd" d="M60 550L620 550"/>
+<path class="ht" d="M75 550L67 558M135 550L127 558M195 550L187 558M255 550L247 558M315 550L307 558M375 550L367 558M435 550L427 558M495 550L487 558M555 550L547 558M615 550L607 558"/>
+<text class="ts" x="60" y="571">真实地面</text>
+<circle class="pt" cx="310" cy="470" r="4"/><circle class="pt" cx="455" cy="510" r="4"/><circle class="pt" cx="600" cy="510" r="4"/>
+<text class="ts" x="318" y="464">P1 等效台阶点</text>
+<text class="ts" x="463" y="504">P2 后段中点</text>
+<text class="ts" x="592" y="504" text-anchor="end">P3 车厢后壁</text>
+<path class="dm" d="M310 470L310 550" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="318" y="533">H1</text>
+<path class="dm" d="M455 510L455 550" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="463" y="535">H2</text>
+<path class="dm" d="M600 510L600 550" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="592" y="535" text-anchor="end">H3</text>
+<path class="dm" d="M95 584L310 584" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="202" y="579" text-anchor="middle">L1</text>
+<path class="dm" d="M310 584L455 584" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="382" y="579" text-anchor="middle">L2</text>
+<path class="dm" d="M455 584L600 584" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="527" y="579" text-anchor="middle">L3</text>
+
+<text class="th" x="40" y="632">情况 4 — 整体坡度，等分三段各建直角三角形</text>
+<path class="st" d="M95 650L95 680M95 680L600 740"/>
+<path class="eq" d="M95 680L263 680L263 700L432 700L432 720L600 720L600 740"/>
+<rect class="ra" x="255" y="680" width="8" height="8"/>
+<rect class="ra" x="424" y="700" width="8" height="8"/>
+<rect class="ra" x="592" y="720" width="8" height="8"/>
+<text class="ts" x="110" y="706">实际坡面</text>
+<text class="ts" x="300" y="694">等效三级台阶</text>
+<path class="gd" d="M60 780L620 780"/>
+<path class="ht" d="M75 780L67 788M135 780L127 788M195 780L187 788M255 780L247 788M315 780L307 788M375 780L367 788M435 780L427 788M495 780L487 788M555 780L547 788M615 780L607 788"/>
+<text class="ts" x="60" y="801">真实地面</text>
+<circle class="pt" cx="263" cy="680" r="4"/><circle class="pt" cx="432" cy="700" r="4"/><circle class="pt" cx="600" cy="720" r="4"/>
+<text class="ts" x="271" y="674">P1</text>
+<text class="ts" x="440" y="694">P2</text>
+<text class="ts" x="592" y="714" text-anchor="end">P3</text>
+<path class="dm" d="M263 680L263 780" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="271" y="745">H1</text>
+<path class="dm" d="M432 700L432 780" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="440" y="755">H2</text>
+<path class="dm" d="M600 720L600 780" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="592" y="760" text-anchor="end">H3</text>
+<path class="dm" d="M95 814L263 814" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="179" y="809" text-anchor="middle">L1</text>
+<path class="dm" d="M263 814L432 814" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="347" y="809" text-anchor="middle">L2</text>
+<path class="dm" d="M432 814L600 814" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="ts" x="516" y="809" text-anchor="middle">L3</text>
+</svg>

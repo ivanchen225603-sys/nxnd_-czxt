@@ -1,0 +1,224 @@
+{
+  "CH1": {
+    "measurementId": "shared-CH1",
+    "nodeId": "n1",
+    "channelId": "CH1",
+    "passageId": "passage-CH1",
+    "calibrationId": "cal-CH1",
+    "sourceMode": "live",
+    "algorithmVersion": "ch4-contract-v1",
+    "configurationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "baselineCandidateSha256": null,
+    "measuredAt": "2024-01-01T00:00:00Z",
+    "baselineUse": {
+      "sourceChannelId": "CH4",
+      "sourceCalibrationId": "cal1",
+      "sourceConfigurationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "policy": "ch4-shared-v1",
+      "registrationStatus": "baseline_fallback",
+      "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+      "dxM": 0.0,
+      "dyM": 0.0,
+      "yawSlope": 0.0,
+      "yawPivotYM": 0.0,
+      "pose": null
+    },
+    "verdict": "loaded",
+    "frameDegraded": false,
+    "volumeStatus": "success",
+    "volumeM3": 2.385599999999997,
+    "baselineVersionId": "ch4-original",
+    "filledRatio": 0.08794433266264239,
+    "boundSpread": null,
+    "holeRatio": 0.004610999329309099,
+    "pointCount": 100,
+    "reason": "底面过高，疑似载物",
+    "points": [
+      [
+        1.25,
+        2.0,
+        -3.0
+      ]
+    ]
+  },
+  "CH2": {
+    "measurementId": "shared-CH2",
+    "nodeId": "n1",
+    "channelId": "CH2",
+    "passageId": "passage-CH2",
+    "calibrationId": "cal-CH2",
+    "sourceMode": "live",
+    "algorithmVersion": "ch4-contract-v1",
+    "configurationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "baselineCandidateSha256": null,
+    "measuredAt": "2024-01-01T00:00:00Z",
+    "baselineUse": {
+      "sourceChannelId": "CH4",
+      "sourceCalibrationId": "cal1",
+      "sourceConfigurationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "policy": "ch4-shared-v1",
+      "registrationStatus": "baseline_fallback",
+      "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+      "dxM": 0.0,
+      "dyM": 0.0,
+      "yawSlope": 0.0,
+      "yawPivotYM": 0.0,
+      "pose": null
+    },
+    "verdict": "loaded",
+    "frameDegraded": false,
+    "volumeStatus": "success",
+    "volumeM3": 2.385599999999997,
+    "baselineVersionId": "ch4-original",
+    "filledRatio": 0.08794433266264239,
+    "boundSpread": null,
+    "holeRatio": 0.004610999329309099,
+    "pointCount": 100,
+    "reason": "底面过高，疑似载物",
+    "points": [
+      [
+        1.25,
+        2.0,
+        -3.0
+      ]
+    ]
+  },
+  "CH3": {
+    "measurementId": "shared-CH3",
+    "nodeId": "n1",
+    "channelId": "CH3",
+    "passageId": "passage-CH3",
+    "calibrationId": "cal-CH3",
+    "sourceMode": "live",
+    "algorithmVersion": "ch4-contract-v1",
+    "configurationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "baselineCandidateSha256": null,
+    "measuredAt": "2024-01-01T00:00:00Z",
+    "baselineUse": {
+      "sourceChannelId": "CH4",
+      "sourceCalibrationId": "cal1",
+      "sourceConfigurationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "policy": "ch4-shared-v1",
+      "registrationStatus": "baseline_fallback",
+      "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+      "dxM": 0.0,
+      "dyM": 0.0,
+      "yawSlope": 0.0,
+      "yawPivotYM": 0.0,
+      "pose": null
+    },
+    "verdict": "loaded",
+    "frameDegraded": false,
+    "volumeStatus": "success",
+    "volumeM3": 2.385599999999997,
+    "baselineVersionId": "ch4-original",
+    "filledRatio": 0.08794433266264239,
+    "boundSpread": null,
+    "holeRatio": 0.004610999329309099,
+    "pointCount": 100,
+    "reason": "底面过高，疑似载物",
+    "points": [
+      [
+        1.25,
+        2.0,
+        -3.0
+      ]
+    ]
+  },
+  "CH4": {
+    "measurementId": "shared-CH4",
+    "nodeId": "n1",
+    "channelId": "CH4",
+    "passageId": "passage-CH4",
+    "calibrationId": "cal-CH4",
+    "sourceMode": "live",
+    "algorithmVersion": "ch4-contract-v1",
+    "configurationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "baselineCandidateSha256": null,
+    "measuredAt": "2024-01-01T00:00:00Z",
+    "baselineUse": {
+      "sourceChannelId": "CH4",
+      "sourceCalibrationId": "cal1",
+      "sourceConfigurationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "policy": "ch4-shared-v1",
+      "registrationStatus": "baseline_fallback",
+      "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+      "dxM": 0.0,
+      "dyM": 0.0,
+      "yawSlope": 0.0,
+      "yawPivotYM": 0.0,
+      "pose": null
+    },
+    "verdict": "loaded",
+    "frameDegraded": false,
+    "volumeStatus": "success",
+    "volumeM3": 2.385599999999997,
+    "baselineVersionId": "ch4-original",
+    "filledRatio": 0.08794433266264239,
+    "boundSpread": null,
+    "holeRatio": 0.004610999329309099,
+    "pointCount": 100,
+    "reason": "底面过高，疑似载物",
+    "points": [
+      [
+        1.25,
+        2.0,
+        -3.0
+      ]
+    ]
+  },
+  "aligned": {
+    "measurementId": "shared-CH1",
+    "nodeId": "n1",
+    "channelId": "CH1",
+    "passageId": "passage-CH1",
+    "calibrationId": "cal-CH1",
+    "sourceMode": "live",
+    "algorithmVersion": "ch4-contract-v1",
+    "configurationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "baselineCandidateSha256": null,
+    "measuredAt": "2024-01-01T00:00:00Z",
+    "baselineUse": {
+      "sourceChannelId": "CH4",
+      "sourceCalibrationId": "cal1",
+      "sourceConfigurationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "policy": "ch4-shared-v1",
+      "registrationStatus": "resolved",
+      "registrationReason": "按车厢后沿对齐 +0.50 m；（横向对齐 +0.300 m：侧壁 +0.300 / 车厢盒 +0.300 m）；（偏航对齐 +0.23°：左壁 +0.39 / 右壁 +0.40 cm/m）；（姿态对齐：中心高差 +3.0±0.0 cm，横滚 +0.00°，俯仰 -0.00°，剔除煤面够到壁顶的 2 段，逐项两倍条件标准误：高差采用、横滚置零、俯仰置零）",
+      "dxM": 0.299618067741394,
+      "dyM": 0.5000076293945312,
+      "yawSlope": 0.003969346819739586,
+      "yawPivotYM": 0.4750038146972644,
+      "pose": {
+        "left": [
+          0.02997076207439023,
+          0.0
+        ],
+        "right": [
+          0.02997076207439023,
+          0.0
+        ],
+        "xLeft": -0.9499800503253937,
+        "xRight": 1.548456026315689,
+        "yMid": 0.4750038146972644
+      }
+    },
+    "verdict": "loaded",
+    "frameDegraded": false,
+    "volumeStatus": "success",
+    "volumeM3": 23.89218057352164,
+    "baselineVersionId": "ch4-original",
+    "filledRatio": 0.13997380500472528,
+    "boundSpread": null,
+    "holeRatio": 0.0,
+    "pointCount": 100,
+    "reason": "底面过高，疑似载物",
+    "points": [
+      [
+        1.25,
+        2.0,
+        -3.0
+      ]
+    ]
+  }
+}

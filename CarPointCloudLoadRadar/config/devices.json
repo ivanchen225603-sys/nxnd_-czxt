@@ -1,0 +1,33 @@
+{
+  "lidar": {
+    "config_path": "config/config.json",
+    "lidar_ip": "192.168.1.201",
+    "ip_override": ""
+  },
+  "fusion": {
+    "imu_warmup_sec": 5,
+    "session_timeout_sec": 180,
+    "entry_baseline_dir": "data/in"
+  },
+  "calibrate": {
+    "stationary_warn_sec": 30,
+    "min_save_points": 20000,
+    "dims_min_length_m": 10.0,
+    "dims_min_width_m": 2.0,
+    "dims_min_height_m": 1.5,
+    "result_hold_sec": 8,
+    "loaded_output_dir": "data/loaded",
+    "floor_gate_distance_m": 0.015,
+    "floor_gate_normal_z_min": 0.99,
+    "floor_gate_z_above_min_max_m": 0.08,
+    "floor_gate_z_above_mode": "plane",
+    "floor_gate_min_inliers": 600,
+    "floor_gate_min_inlier_ratio": 0.15,
+    "floor_gate_min_span_x_m": 1.8,
+    "floor_gate_min_span_y_m": 5.0,
+    "floor_gate_bed_exposure_min": 0.0,
+    "floor_gate_bed_flatness_max": 0.032,
+    "floor_gate_bed_thickness_min": 2.20,
+    "floor_gate_floor_height_max_m": 2.3
+  }
+}

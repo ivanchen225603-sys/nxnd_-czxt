@@ -1,0 +1,47 @@
+/* Reuse the management shell's palette, controls, and spacing. */
+.volume-workspace { width: 100%; padding: 24px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.volume-heading h1 { display: flex; align-items: center; gap: 12px; font-size: 26px; line-height: 1.35; font-weight: 650; }
+.volume-heading h1 .ui-icon { width: 28px; height: 28px; flex-basis: 28px; }
+.volume-heading p { margin-top: 8px; color: var(--text-secondary); font-size: 14px; }
+.volume-panel { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; min-width: 0; }
+.volume-panel h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.volume-filters { display: grid; grid-template-columns: repeat(2, minmax(145px, 1fr)) minmax(180px, 1.4fr) minmax(155px, 1fr) auto; align-items: end; gap: 16px; margin-top: 20px; }
+.volume-filters .filter-group { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; }
+.volume-filters label { font-size: 14px; color: var(--text-secondary); }
+.volume-filters input, .volume-filters select { width: 100%; min-width: 0; }
+.volume-filter-actions, .volume-page-actions { display: flex; align-items: center; gap: 10px; }
+.volume-filter-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; }
+.volume-filter-actions .ui-icon { width: 18px; height: 18px; flex-basis: 18px; }
+.volume-error { margin-top: 16px; padding: 10px 14px; border: 1px solid #fecaca; border-radius: 6px; background: #fef2f2; color: var(--accent-danger); font-size: 14px; }
+.volume-results { padding: 0; overflow: hidden; }
+.volume-results-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px; }
+.volume-results-heading span { font-size: 13px; color: var(--text-secondary); }
+.volume-table-scroll { overflow-x: auto; min-height: 330px; }
+.volume-table { width: 100%; min-width: 620px; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+.volume-table th, .volume-table td { padding: 17px 24px; text-align: left; border-bottom: 1px solid var(--border-color); line-height: 1.5; }
+.volume-table th { background: #f7f9fc; color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
+.volume-table th:first-child { width: 31%; }
+.volume-table td:first-child { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.volume-table td:nth-child(2) { font-weight: 500; overflow-wrap: anywhere; }
+.volume-table .volume-number { text-align: right; font-variant-numeric: tabular-nums; }
+.volume-table td.volume-number { color: #1d4ed8; font-size: 16px; font-weight: 600; }
+.volume-table tbody tr:hover { background: #f8faff; }
+.volume-empty { padding: 75px 24px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+.volume-pagination { border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; font-size: 14px; color: var(--text-secondary); }
+.volume-page-actions label { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.volume-page-actions select { padding: 7px 10px; min-height: 38px; color: var(--text-primary); background: #fff; border: 1px solid #cbd7e7; border-radius: 6px; }
+@media (max-width: 1280px) {
+    .volume-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .volume-filter-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 600px) {
+    .volume-workspace { padding: 16px; gap: 16px; }
+    .volume-panel { padding: 16px; }
+    .volume-results { padding: 0; }
+    .volume-heading h1 { font-size: 23px; }
+    .volume-filters { grid-template-columns: minmax(0, 1fr); }
+    .volume-filter-actions button { flex: 1; }
+    .volume-results-heading { padding: 16px; align-items: flex-start; flex-direction: column; gap: 4px; }
+    .volume-pagination { padding: 16px; align-items: stretch; flex-direction: column; }
+    .volume-page-actions { justify-content: space-between; flex-wrap: wrap; }
+}

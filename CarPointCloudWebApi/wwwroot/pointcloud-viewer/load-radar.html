@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>载货雷达 - 体积测量</title>
+    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/load-radar.css?v=20260928-3">
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
+    <link rel="stylesheet" href="css/load-radar-overview.css?v=20261029-1">
+    <link rel="stylesheet" href="css/page-shell.css?v=20261029-1">
+</head>
+<body class="load-radar-page">
+    <nav id="global-nav" class="global-nav" aria-label="主导航">
+        <a class="nav-brand" href="live.html">
+            <img class="ui-icon" src="vendor/tabler-icons/radar-2.svg" alt="" aria-hidden="true">
+            <span class="nav-title">
+                车载雷达点云系统
+                <span class="brand-caption">
+                    车辆测量工作台
+                </span>
+            </span>
+        </a>
+        <div class="nav-account">
+            <span id="navRole">
+                当前用户
+            </span>
+            <span id="navUser">
+            </span>
+            <a href="#" id="navLogout" title="退出登录">
+                退出
+            </a>
+        </div>
+        <div class="nav-links">
+            <span class="nav-group">
+                现场作业
+            </span>
+            <a href="live.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/antenna.svg" alt="" aria-hidden="true">
+                空车尺寸测量
+            </a>
+            <a href="load-radar.html" class="nav-link active" aria-current="page" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/cube.svg" alt="" aria-hidden="true">
+                载货体积
+            </a>
+            <a href="index.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">
+                空车档案
+            </a>
+            <span class="nav-group management">
+                管理
+            </span>
+            <a href="volume-query.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                体积查询
+            </a>
+            <a href="logs.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true">
+                日志
+            </a>
+            <a href="users.html" class="nav-link" data-role="admin">
+                <img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">
+                用户管理
+            </a>
+        </div>
+    </nav>
+    <header class="radar-header">
+        <div class="brand">载货体积<small>JT128 单雷达 · 四路通道实时监看 · 体积单位 m³</small></div>
+        <div class="spacer"></div>
+        <span class="pill"><span id="connectionDot" class="dot"></span><span id="loadConnection" role="status">正在连接</span></span>
+        <span class="channel-total">在线通道 <b id="onlineCount">--</b> / <b id="channelCount">--</b></span>
+        <button id="openHistory" type="button"><img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">历史记录</button>
+        <nav class="chantabs" id="laneTabs" aria-label="通道筛选"></nav>
+    </header>
+    <main class="radar-main">
+        <p id="laneNotice" class="empty-note" role="status">正在等待通道</p>
+        <div class="live-layout" id="liveLayout">
+            <div class="grid" id="loadLanes" aria-label="四路实时雷达画面"></div>
+            <section class="run-logs" id="runLogs" aria-labelledby="runLogsTitle">
+                <div class="logs-heading">
+                    <h2 id="runLogsTitle">车辆运行记录 · 已保存</h2>
+                    <p>四路记录汇总；历史记录与当前实时状态可能不同。</p>
+                </div>
+                <div class="lane-log-host" id="laneLogs"></div>
+            </section>
+        </div>
+    </main>
+    <dialog id="historyDialog" aria-labelledby="historyTitle">
+        <div class="history-heading"><h2 id="historyTitle">测量历史</h2><button id="closeHistory" type="button">关闭</button></div>
+        <form id="loadHistoryForm" class="history-filters">
+            <label>车牌<input id="filterPlate" class="live-input" autocomplete="off" maxlength="32" placeholder="全部车牌"></label>
+            <label>通道<select id="filterChannel" class="live-input"><option value="">全部通道</option></select></label>
+            <label>开始时间<input id="filterFrom" class="live-input" type="datetime-local"></label>
+            <label>结束时间<input id="filterTo" class="live-input" type="datetime-local"></label>
+            <button type="submit">查询</button>
+        </form>
+        <p id="historySummary" role="status">尚未查询</p>
+        <div class="history-scroll"><table><thead><tr><th>测量时间</th><th>通道</th><th>车牌</th><th>状态</th><th>体积 m³</th><th>操作</th></tr></thead><tbody id="loadHistoryRows"></tbody></table></div>
+        <button id="loadHistoryMore" type="button" disabled>加载更多</button>
+        <section id="historyDetail" class="history-detail" hidden aria-label="历史测量详情">
+            <h3>历史结果 · 非实时</h3>
+            <p id="historyResultStatus" role="status"></p>
+            <p>车牌：<span id="historyResultPlate">--</span>　体积：<span id="historyResultVolume">--</span> m³</p>
+            <p id="historyResultTime"></p><p id="historyResultNote"></p>
+            <canvas id="historyCanvas" class="cloud" aria-label="历史测量点云，非实时"></canvas>
+            <p class="hint">历史点云，非实时 · 拖动旋转 · 滚轮缩放 · 双击复位</p>
+        </section>
+    </dialog>
+    <script src="js/api-config.js?v=1"></script>
+    <script src="js/api-client.js?v=3"></script>
+    <script src="js/auth-guard.js"></script>
+    <script src="js/nav.js?v=20261012-1"></script>
+    <script src="js/load-radar-cloud.js?v=20261102-1"></script>
+    <script src="js/load-radar.js?v=20261103-1"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "node_id": "jt128-01",
+  "base_url": "http://127.0.0.1:5031",
+  "agent_key": "REPLACE-WITH-UNIQUE-RANDOM-SECRET-32-CHARS",
+  "storage_dir": "../data/field/webapi-outbox",
+  "algorithm_version": "jt128-clean-room-20260917",
+  "timeout_sec": 5,
+  "retry_sec": 2,
+  "allow_insecure_http": false,
+  "channels": {
+    "CH1": { "calibration_id": "CH1-calibration-v1" },
+    "CH2": { "calibration_id": "CH2-calibration-v1" },
+    "CH3": { "calibration_id": "CH3-calibration-v1" },
+    "CH4": { "calibration_id": "CH4-calibration-v1" }
+  }
+}

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefaultItemExcludes>$(DefaultItemExcludes);CarPointCloudLadarWorker.Tests\**;artifacts\**;packaging\**;native\**</DefaultItemExcludes>
+    <UserSecretsId>dotnet-CarPointCloudLadarWorker-c581c6d5-8363-47ef-9203-979e386babd9</UserSecretsId>
+    <!-- Linux 发布使用随包提供的 libladar_bridge.so；其他目标保持现有 Windows CLR SDK。 -->
+    <DefineConstants Condition="'$(RuntimeIdentifier)' != 'linux-x64'">$(DefineConstants);WINDOWS_LADAR_SDK</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 让测试项目能直接覆盖 internal 类型（如 SyntheticPointCloudFactory）。仅编译期可见性，无运行时影响。 -->
+    <InternalsVisibleTo Include="CarPointCloudLadarWorker.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="CarPointCloudLadarWorker.Tests\**\*.cs" />
+    <None Remove="CarPointCloudLadarWorker.Tests\**\*" />
+    <Content Remove="CarPointCloudLadarWorker.Tests\**\*" />
+    <EmbeddedResource Remove="CarPointCloudLadarWorker.Tests\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != 'linux-x64'">
+    <Reference Include="ladarsdk_clr">
+      <HintPath>$(LadarSdkRoot)\windows\x64\ladarsdk_clr.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != 'linux-x64'">
+    <None Include="$(LadarSdkRoot)\windows\x64\ladarsdk_gd.dll" Link="ladarsdk_gd.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(LadarSdkRoot)\dep\x64\Release\msvcp140.dll" Link="msvcp140.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(LadarSdkRoot)\dep\x64\Release\vcruntime140.dll" Link="vcruntime140.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(LadarSdkRoot)\dep\x64\Release\vcruntime140_1.dll" Link="vcruntime140_1.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

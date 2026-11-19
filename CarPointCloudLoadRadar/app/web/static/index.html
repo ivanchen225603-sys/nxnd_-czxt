@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>载重雷达检测看板</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --line:#dde3ec; --line2:#eef2f7;
+    --tx:#1d2433; --tx2:#5b6b83; --tx3:#8b98ad;
+    --ok:#0f9d58; --bad:#d93025; --warn:#e8a33d; --info:#1a73e8; --idle:#8b98ad;
+    --shadow:0 1px 3px rgba(22,38,66,.08), 0 6px 18px rgba(22,38,66,.06);
+    --mono:"Cascadia Mono","JetBrains Mono",Consolas,"DejaVu Sans Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--tx);font:14px/1.5 "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif}
+  a{color:var(--info);text-decoration:none}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--tx);
+         border-radius:6px;padding:6px 12px;transition:.14s}
+  button:hover{border-color:#c3ccdb;background:#fafcff}
+  button.on{background:var(--info);border-color:var(--info);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--panel);
+         border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+  .brand{font-weight:700;font-size:16px;letter-spacing:.3px}
+  .brand small{font-weight:400;color:var(--tx3);margin-left:8px;font-size:12px}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--tx2);
+        background:#f7f9fc;border:1px solid var(--line2);border-radius:999px;padding:3px 10px;
+        font-family:var(--mono)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:0 0 auto}
+  .dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+  .dot.warn{background:var(--warn)} .dot.info{background:var(--info)}
+
+  main{padding:16px 20px 40px;max-width:1720px;margin:0 auto}
+  /* ★ 卡片最小宽 360px：1600 宽的桌面窗口正好排下 4 路（4×360+3×16=1488）。
+     原来 520px 时 1600 宽只能排 3 列，第 4 路被挤到第二行，演示时得滚动才能看全。
+
+     ★★ 但光改 minmax 是**不够的** —— 实测仍排成 3 列且整体横向溢出窗口。
+     原因是网格项默认 min-width:auto：卡片里「六面拟合」表的单元格是
+     white-space:nowrap，表的 min-content 宽度约 560px，于是自动撑破轨道，
+     1fr 也压不下去（CSS Grid 的经典 blowout）。
+     所以下面必须配套 min-width:0，让滚动容器自己去横向滚动。 */
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+  /* ★ min-width:0 必须沿着"grid 项 → flex 容器 → 子项"整条链都加上，
+     任何一层漏了，那一层的 min-content 就会顶住轨道、把 4 列挤成 3 列。 */
+  .grid > .card{min-width:0}
+  .card > h2{min-width:0;flex-wrap:wrap}
+  .card > h2 > *{min-width:0}
+  .card > .body,
+  .card > .body > *{min-width:0}
+  .detail, .detail > *{min-width:0}
+  /* 详情折叠（诊断 / 六面 / 历史）—— 默认收起，判定+KPI+点云才是演示要看的东西 */
+  .detail{display:none;flex-direction:column;gap:12px;padding-top:2px;min-width:0}
+  .detail.open{display:flex}
+  .detail .scroll{min-width:0}
+  button.detail-toggle{align-self:flex-start;font-size:12px;padding:3px 10px;
+                       background:#fff;color:var(--tx2)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);
+        overflow:hidden;display:flex;flex-direction:column}
+  /* ★ h2 必须允许换行：它是 flex 且里面塞了 名称 + 元信息 + 4 个徽标（都 nowrap），
+     不换行时 min-content ≈ 600px，会把 grid 轨道顶宽 → 1600 宽只能排 3 列。
+     详情见 .grid 上方的说明。 */
+  .card h2{margin:0;padding:11px 14px;font-size:14px;font-weight:600;border-bottom:1px solid var(--line2);
+           display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(#fff,#fcfdff)}
+  .card h2 .name{font-weight:700;white-space:nowrap}
+  .card h2 .meta{color:var(--tx3);font-size:12px;font-family:var(--mono);font-weight:400;
+                 min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .card h2 .badge{flex:0 0 auto}
+  .card .body{padding:14px;display:flex;flex-direction:column;gap:12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .row.tight{gap:6px}
+
+  .verdict{border-radius:8px;padding:12px 14px;border:1px solid var(--line);background:#fbfcfe}
+  .verdict .big{font-size:20px;font-weight:700;letter-spacing:.5px}
+  .verdict .sub{color:var(--tx2);font-size:12px;font-family:var(--mono);margin-top:3px}
+  .verdict.is-empty{background:#f0fbf4;border-color:#bfe6cd}
+  .verdict.is-empty .big{color:var(--ok)}
+  .verdict.is-loaded{background:#fdf1f0;border-color:#f3cfcb}
+  .verdict.is-loaded .big{color:var(--bad)}
+  .verdict.stale{opacity:.72}
+  .verdict.stale .big{font-weight:600}
+  /* 空车道：正常工况，用中性蓝灰 —— 不能长得像报警，也不能像"有结论" */
+  .verdict.is-idle{background:#f5f8fc;border-color:#cfdcea}
+  .verdict.is-idle .big{color:#4a6b8a}
+  .verdict.is-wait{background:#fafbfd;border-color:var(--line2)}
+  .verdict.is-wait .big{color:var(--tx3);font-size:16px}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(94px,1fr));gap:8px}
+  .kpi{background:#fafbfd;border:1px solid var(--line2);border-radius:7px;padding:8px 10px}
+  .kpi .k{color:var(--tx3);font-size:11px}
+  .kpi .v{font-family:var(--mono);font-size:15px;font-weight:600;margin-top:2px;
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .v.sm{font-size:13px}
+
+  canvas.cloud{width:100%;height:300px;display:block;background:#0e1626;border-radius:8px;cursor:grab}
+  canvas.cloud:active{cursor:grabbing}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--tx3);font-family:var(--mono)}
+  .legend button.freeze{margin-left:auto;font-size:11px;padding:2px 9px}
+  .chan-health{font-size:12.5px;line-height:1.55;color:#8a4b00;background:#fff6e5;
+    border:1px solid #f0d08a;border-left:4px solid #e08a00;border-radius:6px;
+    padding:8px 10px;margin-top:8px}
+  .chan-health b{color:#b3261e}
+  .chan-err{font-size:12px;font-family:var(--mono);color:#b3261e;background:#fdf1f0;
+            border:1px solid #f3cfcb;border-radius:7px;padding:7px 9px;word-break:break-all}
+
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th,td{padding:5px 7px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+  th{color:var(--tx3);font-weight:600;text-align:right;position:sticky;top:0;background:#fbfcfe}
+  th:first-child,td:first-child{text-align:left}
+  tr.bad td{background:#fdf5f4}
+  .scroll{max-height:230px;overflow:auto;border:1px solid var(--line2);border-radius:7px}
+
+  .diag{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;font-family:var(--mono);font-size:12px}
+  .diag div{background:#fafbfd;border:1px solid var(--line2);border-radius:6px;padding:6px 8px;
+            display:flex;justify-content:space-between;gap:8px}
+  .diag span:first-child{color:var(--tx3)}
+  .diag .pass{color:var(--ok);font-weight:700}
+  .diag .fail{color:var(--bad);font-weight:700}
+
+  /* 判定链 11 步 */
+  .steps{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12px}
+  .steps div{display:flex;gap:8px;align-items:baseline;padding:3px 8px;border-radius:5px;
+             background:#fafbfd;border:1px solid var(--line2)}
+  .steps .n{color:var(--tx3);min-width:22px;text-align:right}
+  .steps .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .steps .v{color:var(--tx2)}
+  .steps .m{min-width:74px;text-align:right}
+  .steps .s-pass{color:var(--ok)}
+  .steps .s-skip{opacity:.45}
+  .steps .s-block{background:#fdf1f0;border-color:#f3cfcb;color:var(--bad);font-weight:700}
+  /* 卡在哪一步的人话说明，横跨整行放在门槛表上方 */
+  .steps .s-note{grid-column:1/-1;background:#fff8e6;border-color:#f0dfb0;
+                 line-height:1.5;padding:6px 8px;white-space:normal}
+  .steps .s-done{background:#eefaf2;border-color:#bfe6cd;color:#0b7a45;font-weight:700}
+
+  .badge{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);
+         background:#f7f9fc;color:var(--tx2);font-family:var(--mono)}
+  .badge.ok{background:#eefaf2;border-color:#bfe6cd;color:#0b7a45}
+  .badge.bad{background:#fdf1f0;border-color:#f3cfcb;color:#b3261e}
+  .badge.info{background:#eef4fe;border-color:#c6dafc;color:#12539e}
+  .badge.warn{background:#fdf7ec;border-color:#f0dcb8;color:#8a5a12}
+
+  .log{font-family:var(--mono);font-size:12px;max-height:210px;overflow:auto;
+       background:#fafbfd;border:1px solid var(--line2);border-radius:7px;padding:8px}
+  .log div{padding:1px 0;border-bottom:1px dashed #eef2f7;display:flex;gap:8px}
+  .log div:last-child{border-bottom:0}
+  .log .t{color:var(--tx3);flex:0 0 auto}
+  .log .m{flex:1;word-break:break-all}
+
+  .banner{padding:10px 14px;border-radius:8px;font-size:12.5px;line-height:1.7;
+          background:#fdf7ec;border:1px solid #f0dcb8;color:#7a4f10}
+  .banner b{color:#6b430c}
+  .hint{color:var(--tx3);font-size:12px}
+  code{font-family:var(--mono);background:#f2f5fa;padding:1px 5px;border-radius:4px;font-size:12px}
+  .empty-note{padding:20px;text-align:center;color:var(--tx3)}
+  .pill.warn-pill{background:#fdf7ec;border-color:#f0dcb8;color:#7a4f10}
+  .pill.warn-pill b{color:#6b430c}
+
+  /* ── 顶部通道切换栏（多雷达时用；仅切换显示，不影响数据与判定） ── */
+  .chantabs{flex:0 0 100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+            padding-top:9px;margin-top:3px;border-top:1px dashed var(--line2)}
+  .chantabs .lbl{color:var(--tx3);font-size:12px;margin-right:2px}
+  .chantabs .tab{display:inline-flex;align-items:center;gap:7px;padding:4px 12px;
+                 border:1px solid var(--line);border-radius:999px;background:#fff;
+                 color:var(--tx2);font-size:12.5px;cursor:pointer;transition:.14s;user-select:none}
+  .chantabs .tab:hover{border-color:#c3ccdb;background:#fafcff}
+  .chantabs .tab .id{font-family:var(--mono);color:var(--tx3);font-size:11.5px}
+  .chantabs .tab.on{background:var(--info);border-color:var(--info);color:#fff}
+  .chantabs .tab.on .id{color:rgba(255,255,255,.82)}
+  .chantabs .tab.on .dot{background:#fff}
+  /* 单通道视图：只显示选中卡片，其余保持后台更新 */
+  body.view-single .grid{grid-template-columns:1fr}
+  body.view-single .grid .card{display:none}
+  body.view-single .grid .card.is-active{display:flex}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">载重雷达检测看板<small>空车 / 载货车 · 麒麟平台</small></div>
+  <div class="spacer"></div>
+  <span class="pill"><span class="dot" id="h-status"></span><span id="h-status-t">连接中…</span></span>
+  <span class="pill">通道 <b id="h-ch">–</b></span>
+  <span class="pill">在线 <b id="h-on">–</b></span>
+  <span class="pill">已存 <b id="h-saved">–</b></span>
+  <span class="pill" id="h-uptime">–</span>
+  <span class="pill" id="h-demo" style="display:none"></span>
+  <button id="btn-auto">自动演示：开</button>
+  <button id="btn-demo">演示：空车</button>
+  <button id="btn-force">强制重测</button>
+  <button id="btn-config">生效配置</button>
+  <nav class="chantabs" id="chantabs"></nav>
+</header>
+
+<main>
+  <div class="banner" id="top-banner" style="margin-bottom:16px">
+    <b>本页是离线自包含的</b>（无任何外部 CDN / 字体 / 库），可直接在客户内网演示。
+    <span id="banner-demo"></span>
+  </div>
+  <div class="grid" id="grid">
+    <div class="empty-note">正在等待第一个通道…</div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2><span class="name">事件日志</span><span class="meta" id="log-meta"></span></h2>
+    <div class="body"><div class="log" id="log"></div></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════
+   点云三维视图 —— 纯 Canvas2D 手写投影，零依赖。
+
+   为什么不引 Three.js：现场是离线内网，任何 CDN / npm 资源都拿不到。
+   这里几千个点做等距投影 + 画家算法完全够看，而且文件只有一份。
+
+   交互：拖拽旋转、滚轮缩放、双击复位。
+   配色：按 z（高度）上色 —— 地板一律蓝，货堆顶面偏黄，一眼能分辨。
+   ══════════════════════════════════════════════════════════════ */
+function CloudView(canvas){
+  const ctx = canvas.getContext("2d");
+  const st = {yaw:-0.6, pitch:0.55, zoom:1, drag:false, lx:0, ly:0, pts:[], auto:true,
+              box:null, frozen:false, raf:0};
+  const DPR = Math.min(window.devicePixelRatio||1, 2);
+
+  function fit(){
+    const r = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, r.width*DPR);
+    canvas.height = Math.max(1, r.height*DPR);
+    draw();
+  }
+  /* ★ 固定取景框（ROI）——2026-09 现场问题之一。
+     原来每帧都按**当前这帧的包围盒**算中心和缩放：多一个噪点、少一排点，
+     整片点云就整体平移/缩放一下，静止的场景看着也在抖，"根本看不清"。
+     改成用配置里的 ROI 当固定取景框：同一个通道的点云永远画在同一个位置、
+     同一个比例、同一套配色，帧与帧之间只有真正变化的部分在动。 */
+  function setBounds(lo, hi){
+    if(!lo || !hi) return;
+    st.box = {lo:lo.slice(0,3), hi:hi.slice(0,3)};
+    schedule();
+  }
+  /* 合并重绘：一次推送里可能连着调好几次 setPoints，没必要各画一遍
+     （4 路同屏时这是实打实的卡顿来源）。
+
+     ★ 用 setTimeout 而不是 requestAnimationFrame：rAF 在"窗口不合成"的环境里
+       （最小化、离屏/内嵌 WebView、远程桌面）**根本不触发**，整块看板会静止不动
+       且毫无提示 —— 现场只会看到"看板死了"。定时器在这些情况下顶多被降频到 1Hz，
+       不会停。实测这个内嵌浏览器里 rAF 确实一次都不回调。 */
+  function schedule(){
+    if(st.raf) return;
+    st.raf = setTimeout(()=>{ st.raf = 0; draw(); }, 50);
+  }
+  function setPoints(p){
+    if(st.frozen) return;          // 冻结时保留画面，方便现场慢慢转着看
+    st.pts = p || [];
+    schedule();
+  }
+  function setFrozen(on){ st.frozen = !!on; if(!on) schedule(); }
+
+  function draw(){
+    const W = canvas.width, H = canvas.height;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,W,H);
+    // 背景网格（等距地面）
+    ctx.fillStyle = "#0e1626"; ctx.fillRect(0,0,W,H);
+
+    const pts = st.pts;
+    if(!pts.length){
+      ctx.fillStyle = "#5b7ba6"; ctx.font = (13*DPR)+"px sans-serif";
+      ctx.textAlign="center";
+      ctx.fillText("等待点云…", W/2, H/2);
+      return;
+    }
+    // 取景框：优先用 ROI（固定），没拿到 ROI 时才退回按当前帧自适应
+    let lo, hi;
+    if(st.box){
+      lo = st.box.lo; hi = st.box.hi;
+    }else{
+      lo=[1e9,1e9,1e9]; hi=[-1e9,-1e9,-1e9];
+      for(const p of pts){ for(let i=0;i<3;i++){ if(p[i]<lo[i])lo[i]=p[i]; if(p[i]>hi[i])hi[i]=p[i]; } }
+    }
+    const c=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,(lo[2]+hi[2])/2];
+    const span = Math.max(hi[0]-lo[0], hi[1]-lo[1], 1.0);
+    // 固定取景框自带余量，不用再留 1.7 倍的边（否则画面会明显偏小）
+    const base = Math.min(W,H) / (span*(st.box?1.25:1.7)) * st.zoom;
+
+    const cy=Math.cos(st.yaw), sy=Math.sin(st.yaw);
+    const cp=Math.cos(st.pitch), sp=Math.sin(st.pitch);
+    const cx=W/2, cyy=H/2;
+
+    const zlo=lo[2], zhi=Math.max(hi[2], lo[2]+0.001);
+    const proj=[];
+    for(const p of pts){
+      let x=p[0]-c[0], y=p[1]-c[1], z=p[2]-c[2];
+      // 绕 z 轴（yaw）
+      let X =  x*cy - y*sy;
+      let Y =  x*sy + y*cy;
+      // 绕 x 轴（pitch）
+      let Y2 = Y*cp - z*sp;
+      let Z2 = Y*sp + z*cp;
+      proj.push([cx + X*base, cyy - Y2*base, Z2, (p[2]-zlo)/(zhi-zlo)]);
+    }
+    proj.sort((a,b)=>a[2]-b[2]);          // 画家算法：远的先画
+
+    // 用 1x1 的离屏 canvas 做圆点，比逐个 arc() 快得多
+    const size = Math.max(1.6*DPR, 1.2);
+    for(const q of proj){
+      const t=q[3];
+      // 低(z 大负值)→ 蓝；高 → 黄/红
+      const r = Math.round( 60 + t*195 );
+      const g = Math.round(140 + t*40 );
+      const b = Math.round(235 - t*180);
+      ctx.fillStyle = "rgb("+r+","+g+","+b+")";
+      ctx.fillRect(q[0]-size/2, q[1]-size/2, size, size);
+    }
+    // 坐标提示
+    ctx.fillStyle="#7d94b5"; ctx.font=(11*DPR)+"px monospace"; ctx.textAlign="left";
+    ctx.fillText("Z="+zlo.toFixed(2)+" … "+zhi.toFixed(2)+" m   N="+pts.length
+                 + (st.box ? "   取景=ROI固定" : "")
+                 + (st.frozen ? "   ⏸ 已冻结" : "")
+                 +"   拖拽旋转 / 滚轮缩放 / 双击复位", 10*DPR, 16*DPR);
+  }
+
+  canvas.addEventListener("mousedown", e=>{st.drag=true; st.lx=e.clientX; st.ly=e.clientY; st.auto=false;});
+  window.addEventListener("mouseup", ()=>st.drag=false);
+  window.addEventListener("mousemove", e=>{
+    if(!st.drag) return;
+    st.yaw   += (e.clientX-st.lx)*0.008;
+    st.pitch += (e.clientY-st.ly)*0.006;
+    st.pitch = Math.max(-1.45, Math.min(1.45, st.pitch));
+    st.lx=e.clientX; st.ly=e.clientY; draw();
+  });
+  canvas.addEventListener("wheel", e=>{
+    e.preventDefault(); st.zoom *= (e.deltaY<0?1.1:0.9);
+    st.zoom = Math.max(0.2, Math.min(8, st.zoom)); st.auto=false; draw();
+  }, {passive:false});
+  canvas.addEventListener("dblclick", ()=>{st.yaw=-0.6; st.pitch=0.55; st.zoom=1; draw();});
+  window.addEventListener("resize", fit);
+  setTimeout(fit, 0);
+  return {setPoints, setBounds, setFrozen, fit, state:st};
+}
+
+/* ══════════════════════════════════════════════════════════════ */
+const cards = new Map();      // id -> {el, view, ...}
+let lastSnapshot = null;
+
+function el(tag, cls, txt){
+  const d = document.createElement(tag);
+  if(cls) d.className = cls;
+  if(txt!==undefined) d.textContent = txt;
+  return d;
+}
+function fmt(v, n){ return (v===null||v===undefined||isNaN(v)) ? "–" : Number(v).toFixed(n===undefined?2:n); }
+function fmtAge(sec){
+  sec = Math.max(0, Math.round(sec));
+  if(sec < 60) return sec + " 秒前";
+  if(sec < 3600) return Math.round(sec/60) + " 分钟前";
+  return Math.round(sec/3600) + " 小时前";
+}
+
+function makeCard(ch){
+  const card = el("div","card"); card.dataset.id = ch.id;
+  const h2 = el("h2");
+  h2.appendChild(el("span","name", ch.name || ch.id));
+  h2.appendChild(el("span","meta", ch.id + " · " + (ch.source_kind||"")));
+  const bOnline = el("span","badge","离线"); bOnline.dataset.role="online";
+  h2.appendChild(bOnline);
+  const bSrc = el("span","badge",""); bSrc.dataset.role="src";
+  h2.appendChild(bSrc);
+  const bSave = el("span","badge",""); bSave.dataset.role="save";
+  h2.appendChild(bSave);
+  const bPhase = el("span","badge",""); bPhase.dataset.role="phase";
+  bPhase.title = "演示编排的当前阶段：车辆驶入 / 停稳测量 / 车辆驶离 / 空场等待";
+  bPhase.style.display = "none";
+  h2.appendChild(bPhase);
+  const bLink = el("span","badge",""); bLink.dataset.role="link";
+  bLink.title = "雷达源 IP · 包率 · 估计转速 · 切帧方式。"
+              + "frame_mode=rotation 时按方位角整圈切帧，与转速无关；"
+              + "切成 time 时 frame_ms 必须约等于 1000/转速Hz，否则每帧只是一片乱转的扇面。";
+  h2.appendChild(bLink);
+  card.appendChild(h2);
+
+  const body = el("div","body"); card.appendChild(body);
+
+  const verdict = el("div","verdict is-wait");
+  verdict.appendChild(el("div","big","等待车辆停稳…"));
+  verdict.appendChild(el("div","sub",""));
+  body.appendChild(verdict);
+
+  const kpis = el("div","kpis");
+  const KPI = [["点数","n"],["停稳偏差","dev"],["帧率","fps"],["车牌","plate"],
+               ["会话","session"],["用时","elapsed"],["结果","verdict"]];
+  kpis.innerHTML = KPI.map(([k,id]) =>
+    '<div class="kpi"><div class="k">'+k+'</div><div class="v" data-k="'+id+'">–</div></div>').join("");
+  body.appendChild(kpis);
+
+  const cw = el("canvas","cloud"); body.appendChild(cw);
+  const view = CloudView(cw);       // ← 先建视图，"展开详情"按钮要用它重算尺寸
+  const legend = el("div","legend");
+  legend.innerHTML = '<span>■ 低（地板）</span><span>■ 高（货堆顶）</span>'+
+    '<span>拖拽旋转 · 滚轮缩放 · 双击复位</span>';
+  // ★ 冻结：现场要凑近看某一帧时，点一下就停止刷新（后台检测照常跑，只是不再重画）。
+  //   没有它的话，想转着看清楚一帧只能靠手速。
+  const bFreeze = el("button","freeze","冻结画面");
+  bFreeze.title = "暂停点云刷新，方便旋转细看；检测与落盘不受影响";
+  bFreeze.onclick = ()=>{
+    const on = !view.state.frozen;
+    view.setFrozen(on);
+    bFreeze.textContent = on ? "▶ 恢复刷新" : "冻结画面";
+    bFreeze.classList.toggle("on", on);
+  };
+  legend.appendChild(bFreeze);
+  body.appendChild(legend);
+
+  // 通道级错误/提示（雷达没出包、方位角没回绕、解码报错…）——平时不占地方
+  const errLine = el("div","chan-err");
+  errLine.style.display = "none";
+  body.appendChild(errLine);
+
+  // ★ 通道健康告警：常驻，不是一行会被刷走的日志。
+  //   它出现时意味着"这条通道的判定结果不可信"，比普通错误更要紧。
+  const healthLine = el("div","chan-health");
+  healthLine.style.display = "none";
+  body.appendChild(healthLine);
+
+  // ── 细节区（诊断 / 六面 / 历史）：默认折叠
+  // ★ 为什么要折叠：四路同屏时，这三块表格加起来有两三屏高，
+  //   领导/客户滑来滑去找不到第 4 路；而它们本来就是**排查用**的信息。
+  //   判定结论 + KPI + 点云才是演示要看的东西。点「详情」随时展开。
+  //
+  //   ★★ 另外：这三张表是 nowrap 的，min-content 宽度约 560px，
+  //      会把卡片所在的 grid 轨道撑宽（见 .grid > .card{min-width:0} 的说明）。
+  //      折叠起来顺带把这个问题彻底绕开了：不显示就没有 min-content。
+  const detail = el("div","detail");
+  const bDetail = el("button","detail-toggle","展开详情 ▾");
+  bDetail.dataset.role = "detail";
+  bDetail.onclick = ()=>{
+    const on = detail.classList.toggle("open");
+    bDetail.textContent = (on ? "收起详情 ▴" : "展开详情 ▾");
+    // 记下用户的手动选择，之后切换通道时不再自动覆盖（见 applyView）
+    if(card._ref) card._ref._userToggled = true;
+    // 折叠期间 canvas 高度变了（display:none 时 clientHeight 为 0，
+    // 位图会被算成 1px），展开后必须重算一次尺寸再画。
+    // ★ 不用 rAF 等布局：内嵌 WebView / 最小化时 rAF 可能一次都不回调，
+    //   那样展开后 canvas 会一直是 1px 的空白条。定时器一定会到。
+    setTimeout(()=>view.fit(), 60);
+  };
+  body.appendChild(bDetail);
+  body.appendChild(detail);
+
+  // ★ 判定链走到第几步被拦（2026-09-16 加）
+  //   原来只显示一句理由（比如「底面过高，疑似载物」），**看不出离通过差多少** ——
+  //   而现场两辆空车的 z_above 是 0.318/0.349、门槛 0.08，差 4 倍还是差 1%，
+  //   处理方式完全不同。这张表把 11 步摊开：每步量什么、实测多少、门槛多少、余量多少。
+  const stepTitle = el("div","hint","判定链：走到第几步被拦");
+  detail.appendChild(stepTitle);
+  const stepNote = el("div","chan-health");     // 复用告警条的样式
+  stepNote.style.display = "none";
+  detail.appendChild(stepNote);
+  const steps = el("div","steps"); detail.appendChild(steps);
+
+  const diagTitle = el("div","hint","判定链诊断（门槛来自 config/devices.json）");
+  detail.appendChild(diagTitle);
+  const diag = el("div","diag"); detail.appendChild(diag);
+
+  const tblTitle = el("div","hint","六面拟合（对应原版 DetectResult 结构体）");
+  detail.appendChild(tblTitle);
+  const scroll = el("div","scroll");
+  const table = el("table");
+  table.innerHTML = "<thead><tr><th>面</th><th>a</th><th>b</th><th>c</th><th>d</th><th>内点</th><th>RMS</th></tr></thead><tbody></tbody>";
+  scroll.appendChild(table); detail.appendChild(scroll);
+
+  const histTitle = el("div","hint","本通道历史（点击行可回看该帧点云不适用，仅列表）");
+  detail.appendChild(histTitle);
+  const hscroll = el("div","scroll"); hscroll.style.maxHeight="170px";
+  const htable = el("table");
+  htable.innerHTML = "<thead><tr><th>时间</th><th>车牌</th><th>判定</th><th>理由</th><th>点数</th><th>偏差</th></tr></thead><tbody></tbody>";
+  hscroll.appendChild(htable); detail.appendChild(hscroll);
+
+  return {card, body, verdict, kpis, view, table, htable,
+          legend, detail, bDetail, errLine, healthLine, bFreeze};
+}
+
+const PLANE_CN = {floor:"底面",roof:"顶面",left:"左壁",right:"右壁",front:"前壁",back:"后壁"};
+
+/* ── 判定文字的"最短停留时间" ────────────────────────────────────────
+   即使后端状态真的在快速切换（车头刚压线、扬尘、雨雪），大字号结论也不该
+   每秒闪好几次 —— 那是人眼最难读的一种界面。这里保证同一段文字至少停留
+   BIG_DWELL_MS，期间来的新状态记在 _wantBig 上，到点了再一次性换过去。
+   只压"结论文字"，下面那行带数字的 sub 照常每次刷新。 */
+const BIG_DWELL_MS = 700;
+/* 判定卡整体换：大字 + 配色 + 副行三者必须同时生效。
+   ★ 曾经只给大字做防抖、副行立刻改，于是切换的那 0.7 秒里会出现
+     "车道空闲 · 无车" 配 "有车点数 4579" 这种自相矛盾的半拍。 */
+function setBig(ref, cls, big, sub){
+  ref._wantBig = big; ref._wantCls = cls; ref._wantSub = sub;
+  // 副行里的数字（点数/偏差）每帧都在变，但只要大字没变就直接刷新，
+  // 不然读数会卡住不动；大字要变时才走防抖，连副行一起延到那一刻。
+  if(ref._bigText === big && ref._bigCls === cls){
+    ref.verdict.querySelector(".sub").textContent = sub;
+    return;
+  }
+  if(ref._bigTimer) return;
+  const wait = BIG_DWELL_MS - (performance.now() - (ref._bigTs||0));
+  if(wait <= 0){ applyBig(ref); }
+  else ref._bigTimer = setTimeout(()=>{ ref._bigTimer = 0; applyBig(ref); }, wait);
+}
+function applyBig(ref){
+  ref._bigText = ref._wantBig; ref._bigCls = ref._wantCls;
+  ref._bigTs = performance.now();
+  ref.verdict.className = "verdict " + ref._wantCls;
+  ref.verdict.querySelector(".big").textContent = ref._wantBig;
+  ref.verdict.querySelector(".sub").textContent = ref._wantSub;
+}
+
+/* light=true：只刷"每帧都会变"的部分（徽标 / 结论 / KPI / 点云）。
+   诊断表、六面表、历史表只在 snapshot 和 result 时重建 —— 它们是 innerHTML
+   整块重排，4 路 × 每帧一次是看板卡顿的主因，而内容本来也只在出结果时才变。 */
+function renderChannel(c, light){
+  let ref = cards.get(c.id);
+  if(!ref){
+    ref = makeCard(c);
+    ref.card._ref = ref;        // 让「展开详情」按钮能记下用户的手动选择
+    cards.set(c.id, ref);
+    const grid = document.getElementById("grid");
+    const note = grid.querySelector(".empty-note");
+    if(note) note.remove();
+    grid.appendChild(ref.card);
+  }
+  const {card, verdict, kpis, view, table, htable} = ref;
+
+  // 在线状态
+  const bOn = card.querySelector('[data-role=online]');
+  bOn.textContent = c.online ? "在线" : "离线";
+  bOn.className = "badge " + (c.online ? "ok" : "bad");
+  const bSrc = card.querySelector('[data-role=src]');
+  bSrc.textContent = {live:"真雷达",replay:"回放","sim-radar":"仿真雷达",
+                      synthetic:"合成点云"}[c.source_kind] || c.source_kind || "–";
+  bSrc.className = "badge " + (c.source_kind==="live" ? "info" : "warn");
+  const bSave = card.querySelector('[data-role=save]');
+  bSave.textContent = c.save_enabled ? "存盘开" : "存盘关";
+  bSave.className = "badge " + (c.save_enabled ? "ok" : "");
+
+  // 演示编排阶段（仅仿真通道 + 自动演示开着时才有）
+  const bPhase = card.querySelector('[data-role=phase]');
+  const dmo = c.demo;
+  if(dmo && dmo.phase){
+    bPhase.style.display = "";
+    bPhase.textContent = dmo.phase + " · 第" + ((dmo.cycle|0)+1) + "趟" +
+                         (dmo.loaded ? " · 载货" : " · 空车");
+    bPhase.className = "badge " + (dmo.phase==="停稳测量" ? "info" : "warn");
+  }else{
+    bPhase.style.display = "none";
+  }
+
+  // 链路：源 IP · 包率 · 转速（真雷达才有意义）
+  const src = c.source || {};
+  const bLink = card.querySelector('[data-role=link]');
+  if(c.source_kind === "live"){
+    const rate = src.packet_rate || 0;
+    const rpm  = src.rpm || 0;
+    // 切帧方式也贴出来：现场一眼就能确认"这一帧到底是不是一整圈"
+    // 兜底切帧的累计数 >0 就挂出来：它是"方位角没解析对/雷达没转"的硬证据，
+    // 比红字告警更持久（告警 30s 没再发生就会消退，这个数字不会）。
+    const fb = src.frames_by_timeout || 0;
+    const fm = (src.frame_mode === "rotation")
+               ? ("整圈切帧 " + (src.rev_packets || 0) + " 包/圈"
+                  + (fb ? " ⚠兜底×" + fb : ""))
+               : ("按时间 " + (src.frame_ms || 0) + "ms");
+    // ROI 保留率：整场扫描里有多少落进检测框。正常应当明显低于 100%
+    //（雷达看的是整个库房，ROI 只是其中一个小盒子）。贴近 100% 说明
+    // 整个场景被压进了 ROI —— 多半是 range_mode / 安装高度不对。
+    const keep = (src.roi_keep === undefined || src.roi_keep === null)
+                 ? "" : " · ROI 留 " + Math.round(src.roi_keep * 100) + "%";
+    bLink.textContent = (src.source_ip || "–") + " · " + fmt(rate,0) + " 包/s · " +
+                        (rpm > 0 ? fmt(rpm,0) + " rpm" : "转速未知") + " · " + fm + keep;
+    // 一个包都没有 = 这台雷达没接通，标红
+    bLink.className = "badge " + (rate > 0 ? (fb ? "warn" : "") : "bad");
+    bLink.style.display = "";
+  }else{
+    bLink.style.display = "none";
+  }
+
+  // ── 判定区：**三态**，别简化成"有没有结论" ──────────────────
+  //   空车道  车道上没有车 —— 这是**正常工况**，不是等待、更不是异常。
+  //           以前这里只分"有没有出过结论"，于是车走了之后大字仍然挂着
+  //           上一辆车的"空车 / 非空车"，现场根本看不出车道现在是空的。
+  //   测量中  车在检测位上但还没出结论（运动中 / 已停稳 / 沉降窗口）
+  //   有结论  车还在检测位上，且这一车已经判完
+  const r = c.last_result || {};
+  const stb = c.stability || {};
+  const hasResult = !!r.reason;
+  const idle = (stb.state === 0);        // StabilityState.IDLE = 车道上没有车
+  // ★ 结论是**属于某一次会话**的。新车进来（会话号变了）但还没测完时，
+  //   绝不能继续显示上一辆车的结论 —— 现场会直接把它当成这一车的结果。
+  const ofThisVehicle = hasResult && !!r.session && !!c.session
+                        && r.session === c.session;
+
+  // 结论的岁数：一律用**服务端**时钟算（看板常开在另一台机器上，
+  // 用浏览器本地时间会因为两边时钟差算出负数或离谱的值）。
+  const srvNow = ref._srvNow || (lastSnapshot && lastSnapshot.service
+                                 && lastSnapshot.service.now) || 0;
+  const hold = (lastSnapshot && lastSnapshot.service
+                && lastSnapshot.service.result_hold_sec) || 0;
+  const age = (srvNow && r.ts) ? (srvNow - r.ts) : 0;
+  const stale = hasResult && hold > 0 && age > hold;
+
+  if(!c.frames){
+    // ★ 一帧都没出过 = 这条通道**根本没收到报文**，不是"在等车"。
+    //   现场那次 4 路全开、只有 CH4 有数据，另外三路的卡片却写着"等待车辆停稳…"，
+    //   看上去和"车道空着"一模一样 —— 必须分开说，否则查不到是接线/源 IP 的问题。
+    setBig(ref, "is-wait", "等待雷达数据…",
+           "还没收到任何报文　·　检查网线、雷达源 IP 与 lidar.source_ip 是否一致");
+  }else if(idle){
+    // ★ 空车道。大字写"无车"而不是"空闲" —— "空闲"和"空车"在这套系统里
+    //   只差一个字、意思差很远，四路同屏时最容易看岔。
+    //   上一辆车的结论降到副行：信息不丢，但不会被当成"当前这一车"。
+    const live = "点数 " + (stb.n_points||0) + "　车辆点 " + (stb.n_vehicle_points||0);
+    setBig(ref, "is-idle", "车道空闲 · 无车", hasResult
+      ? (live + "　·　上一辆：" + (r.empty ? "空车" : "非空车/载货")
+         + "（" + fmtAge(age) + "）")
+      : (live + "　·　本次运行还没有车辆通过"));
+  }else if(hasResult && ofThisVehicle){
+    setBig(ref, (r.empty ? "is-empty" : "is-loaded") + (stale ? " stale" : ""),
+           r.empty ? "空车" : "非空车 / 载货",
+      (stale ? "【" + fmtAge(age) + "的结论】" : "") +
+      "判定理由：" + r.reason + "　·　" +
+      // ★ 三态：判定链十步全部返回 False，「没看清」与「看清了、有货」
+      //   本来是同一个答案，现场无从判断该重测还是该拦截。
+      (r.verdict==="NO_EVIDENCE" ? "【证据不足 · 建议重测】　·　" :
+       r.verdict==="REJECT_LOADED" ? "【证据充分 · 判有货】　·　" : "") +
+      (r.dim_ok ? "尺寸达标" : ("尺寸异常：" + (r.dim_message||""))) +
+      (r.saved ? "　·　已存盘 " + r.saved.split(/[\\/]/).pop() : "　·　未存盘"));
+  }else{
+    // ★ 文案要点：车停稳后不是"没反应"，而是在等**沉降窗口**（settle_sec≈3s）
+    //   走完才出结论。原来只写"已停稳，检测中…"看起来像卡住了，
+    //   现场/演示时最容易被问"怎么不动了"。
+    //   剩余秒数取自后端 st.stability.settle_remain（见 service._tick）。
+    const bigWait = (stb.state_cn === "已停稳") ? "已停稳 · 判定中"
+                  : (stb.state_cn === "运动中" ? "车辆运动中…" : "等待车辆停稳…");
+    // 有车点数（高于地面的点）才是"有没有车"的判据，它贴着阈值抖动就是状态乱翻的原因
+    let s2 = "点数 " + (stb.n_points||0) + "　有车点数 " + (stb.n_vehicle_points||0) +
+             "　偏差 " + fmt(stb.deviation,4) + " m";
+    if(stb.state_cn === "已停稳"){
+      const rem = stb.settle_remain;
+      s2 += "　·　沉降窗口 " + (rem!==undefined && rem!==null
+                                ? fmt(rem,1) + "s 后出结论" : "校验中…");
+    }
+    // 上一辆车的结论放这里：看得见，但明确是"上一辆"，不会被当成这一车的
+    if(hasResult){
+      s2 += "　·　上一辆：" + (r.empty ? "空车" : "非空车/载货") +
+            "（" + fmtAge(age) + "）";
+    }
+    setBig(ref, "is-wait", bigWait, s2);
+  }
+
+  // KPI
+  const kv = {n: c.last_diag && c.last_diag.n_points !== undefined ? c.last_diag.n_points : (r.n_points||0),
+              dev: fmt(stb.deviation,4), fps: fmt(c.fps,2),
+              plate: c.last_plate || "–",
+              session: c.session||0,
+              elapsed: r.elapsed_ms!==undefined ? (r.elapsed_ms+" ms") : "–",
+              verdict: hasResult ? (r.empty?"空车":"非空") : "–"};
+  kpis.querySelectorAll("[data-k]").forEach(n=>{
+    const k=n.dataset.k; let v=kv[k];
+    if(v===undefined||v===null) v="–";
+    n.textContent = v;
+    if(k==="verdict") n.style.color = v==="空车" ? "var(--ok)" : (v==="非空"?"var(--bad)":"");
+  });
+
+  // 点云（取景框固定为该通道的 ROI，见 CloudView.setBounds）
+  if(c.roi && c.roi[0] && c.roi[1] && !ref._roiSet){
+    ref._roiSet = true;
+    view.setBounds(c.roi[0], c.roi[1]);
+  }
+  if(c.cloud && c.cloud.length) view.setPoints(c.cloud);
+
+  // 通道错误/提示（例如"没等到方位角回绕"—— 切帧没切在整圈上的直接证据）
+  if(ref.errLine){
+    const msg = (c.error || "") || ((c.source||{}).error || "");
+    ref.errLine.textContent = msg ? ("⚠ " + msg) : "";
+    ref.errLine.style.display = msg ? "" : "none";
+  }
+  // 健康告警：常驻显示，直到通道重新回到"空闲"为止
+  if(ref.healthLine){
+    const h = c.health || "";
+    if(h){
+      ref.healthLine.innerHTML = "⚠ <b>判定结果不可信</b>　" +
+        h.replace(/[<>&]/g, ch=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[ch]))
+         .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    }
+    ref.healthLine.style.display = h ? "" : "none";
+  }
+
+  if(light) return;      // 下面三张表只在 snapshot / result 时重建
+
+  // 诊断
+  const d = c.last_diag || {};
+  const gate = lastSnapshot && lastSnapshot.gate ? lastSnapshot.gate : {};
+  const rows = [
+    ["点数", d.n_points, null],
+    ["内点数", d.inliers, gate.min_inliers],
+    ["内点占比", (d.ratio!==undefined? fmt(d.ratio,4):"–"), gate.min_inlier_ratio],
+    ["spanX m", fmt(d.span_x,2), gate.min_span_x_m],
+    ["spanY m", fmt(d.span_y,2), gate.min_span_y_m],
+    ["|法向.z|", fmt(d.normal_z,4), gate.normal_z_min],
+    ["floor_z", fmt(d.floor_z,2), null],
+    ["min_z", fmt(d.min_z,2), null],
+    ["z_above", fmt(d.z_above,3), gate.z_above_min_max_m],
+    // 下面两个是**纯诊断**，判定链一个字都不看（2026-09-16 加）：
+    //   底面倾角 —— 空载自卸车底板向车头翘 3.8~4.1 度，正是它让原厂把空车判成载货；
+    //   余高     —— 壁顶减底面，空车实测 2.17~2.32 m、满载 0.18~1.40 m。
+    //               ▲ 但**不能单独当判据**：半装载的车余高能到 2.77 m（docs/12 §4.4）。
+    ["底面倾角°", fmt(d.floor_tilt_deg,2), null],
+    ["余高 m", fmt(d.freeboard,2), null],
+    ["航向角°", fmt(d.yaw_deg,2), null],
+  ];
+  // 双平面（底板 + 货面）：纯诊断，判定链一个字都不看它。
+  // ▲ 俯视单视角下"装满"与"底板更高的空车"本来就分不出来 —— 它能抓的是
+  //   **半装载**（底板露一部分、货占一部分）。见 docs/12 §11。
+  const lp = r.load_profile;
+  if(lp && lp.ok){
+    rows.push(["底板离地 m", fmt(lp.bed_z,2), null]);
+    rows.push(["有货面积%", (lp.cargo_ratio*100).toFixed(0), null]);
+    if(lp.cargo_depth!==null && lp.cargo_depth!==undefined)
+      rows.push(["货高出底板 m", fmt(lp.cargo_depth,2), null]);
+  }
+  // 判定链 11 步：数据由 app/detect.py::gate_report() 算好，前端只负责画
+  const st = card.querySelector(".steps");
+  const note = st.previousElementSibling;
+  // 这一份是在等不到完整帧的情况下硬测的 —— 内点/占比可能因丢包偏低，要打折看
+  // ▲ 2026-09-19 查实：后端 `_degraded_measure` **结构性恒为 False**（全库无
+  //   `= True` 赋值），所以下面这个分支现在**永远不会进**。保留是因为该字段是
+  //   上报契约的一部分（build_measurement 强制要求），若将来恢复"硬测"路径它就活了。
+  if(note){
+    const bits = [];
+    if(r.frame_degraded){
+      bits.push("这一份是在**等不到完整帧**（持续丢包）的情况下测的 —— "
+        + "缺的扇形若落在厢底上，内点数与占比会凭空偏低，第 6/7 步可能误拦。");
+    }
+    // 双平面报出"半装载"时提醒一句：这种车任何"一个平面 + 上面空多少"的判据都会看走眼
+    if(r.load_profile && r.load_profile.ok && r.load_profile.cargo_ratio > 0.05
+       && r.load_profile.cargo_ratio < 0.9){
+      bits.push("双平面：" + r.load_profile.message);
+    }
+    if(bits.length){ note.textContent = bits.join("  "); note.style.display = ""; }
+    else { note.style.display = "none"; }
+  }
+  // ★ 卡在哪一步、差多少 —— 一句人话放在门槛表上方（后端 reason_detail）。
+  //   第 6/7 步还会带上余高与 z_above：实测第 7 步 161 帧**结论全对、理由全错**，
+  //   真实原因是拟合面落在货堆顶，不摆物理量现场会去调错的那个门槛。
+  let detail = r.reason_detail || "";
+  // ★ 证据不足时，把"同窗口另有几帧拿到了完整证据"一并显示。
+  //   后端算了也发了（service.py 的 _window_evidence），但界面一直没读 ——
+  //   而"该重测还是该拦截"正是它要回答的问题。
+  //   ▲ hint 是后端拼好的中文串，前端**不要**自己拼 with_evidence/frames，
+  //     口径会漂。
+  const we = r.window_evidence;
+  if(we && we.hint && r.verdict === "NO_EVIDENCE"){ detail += "　" + we.hint; }
+  const gs = r.gates || [];
+  if(detail){
+    st.innerHTML = '<div class="s-note">' + detail + '</div>';
+  }else{ st.innerHTML = ""; }
+  if(!gs.length){
+    st.innerHTML += '<div class="s-skip"><span class="nm">尚无判定结果</span></div>';
+  }else{
+    st.innerHTML += gs.map(g=>{
+      // state: pass 过了 / block 就是它拦下的 / skip 短路了没走到
+      let cls = "s-" + g.state;
+      if(g.step===11 && g.state==="pass") cls = "s-done";
+      const v = (g.value===null||g.value===undefined) ? "–" : g.value;
+      const lim = (g.limit===null||g.limit===undefined) ? "" : g.op + g.limit;
+      const m = (g.margin===null||g.margin===undefined) ? "" :
+                (g.margin>=0?"+":"") + (+g.margin).toFixed(4);
+      const tag = g.state==="block" ? " ← 卡在这" : "";
+      return '<div class="'+cls+'"><span class="n">'+g.step+'</span>'+
+             '<span class="nm">'+g.name+tag+'</span>'+
+             '<span class="v">'+v+'</span><span class="v">'+lim+'</span>'+
+             '<span class="m">'+m+'</span></div>';
+    }).join("");
+  }
+
+  const dg = card.querySelector(".diag");
+  dg.innerHTML = rows.map(([k,v,g])=>{
+    let cls="";
+    const num = parseFloat(v);
+    if(g!==null && g!==undefined && !isNaN(num)){
+      // 门槛方向：inlier/ratio/span/normal 是"≥"，z_above 是"≤"
+      const ge = !(k==="z_above");
+      const pass = ge ? (num>=g) : (num<=g);
+      cls = pass ? "pass" : "fail";
+    }
+    return '<div><span>'+k+'</span><span class="'+cls+'">'+v+(g!==null&&g!==undefined?' / '+g:'')+'</span></div>';
+  }).join("");
+
+  // 六面
+  const tb = table.querySelector("tbody");
+  const planes = r.planes || {};
+  tb.innerHTML = Object.keys(planes).map(k=>{
+    const p=planes[k];
+    const bad = !p.valid ? ' class="bad"' : "";
+    return '<tr'+bad+'><td>'+(PLANE_CN[k]||k)+'</td><td>'+fmt(p.a,4)+'</td><td>'+fmt(p.b,4)+
+      '</td><td>'+fmt(p.c,4)+'</td><td>'+fmt(p.d,4)+'</td><td>'+p.inliers+'</td><td>'+fmt(p.rms,4)+'</td></tr>';
+  }).join("") || '<tr><td colspan="7" style="text-align:center;color:#8b98ad">尚无结果</td></tr>';
+
+  // 历史
+  const hb = htable.querySelector("tbody");
+  const hs = (c.history||[]).slice().reverse();
+  hb.innerHTML = hs.map((h,i)=>{
+    const t = h.ts ? new Date(h.ts*1000).toLocaleTimeString("zh-CN",{hour12:false}) : "–";
+    return '<tr'+(h.empty?"":" class=\"bad\"")+'><td>'+t+'</td><td>'+(h.plate||"–")+
+      '</td><td>'+(h.empty?"空车":"非空")+'</td><td>'+(h.reason||"")+'</td><td>'+(h.n_points||0)+
+      '</td><td>'+fmt(h.deviation,4)+'</td></tr>';
+  }).join("") || '<tr><td colspan="6" style="text-align:center;color:#8b98ad">尚无记录</td></tr>';
+}
+
+/* ── 日志 ── */
+const logEl = document.getElementById("log");
+const logLines = [];
+function logAdd(kind, text){
+  const t = new Date().toLocaleTimeString("zh-CN",{hour12:false});
+  const color = {result:"var(--info)", error:"var(--bad)", warn:"var(--warn)",
+                 session_start:"var(--ok)", plate_miss:"var(--warn)",
+                 demo:"var(--tx3)"}[kind] || "var(--tx2)";
+  logLines.push('<div><span class="t">'+t+'</span><span class="m" style="color:'+color+'">'+
+                '['+kind+'] '+text.replace(/[<>&]/g, s=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[s]))+
+                '</span></div>');
+  while(logLines.length>300) logLines.shift();
+  logEl.innerHTML = logLines.slice(-200).join("");
+  document.getElementById("log-meta").textContent = logLines.length + " 条";
+}
+
+/* ── 顶部通道切换（多雷达）────────────────────────────────────────────
+   ★ 只切换"显示哪个通道卡片"，不改变任何数据链路：
+     SSE 订阅、各通道解码/判定/存盘、事件日志 全部照旧在后台跑，
+     被隐藏的卡片仍在每帧更新数据，只是不显示。
+   "全部"= 原有并排视图（默认，兼容单/双雷达时的老用法）。 */
+let viewCh = "all";
+const tabRefs = new Map();          // key -> {tab, dot}
+
+function renderTabs(channels){
+  const nav = document.getElementById("chantabs");
+  if(!nav) return;
+  const ids = channels.map(c=>c.id);
+  const cur = [...tabRefs.keys()];
+  // 通道增删才重建 DOM，避免每帧重置造成闪烁／点击丢失
+  const same = cur.length === ids.length+1 && ids.every((v,i)=>cur[i+1]===v);
+  if(!same){
+    nav.innerHTML = ""; tabRefs.clear();
+    if(viewCh!=="all" && !ids.includes(viewCh)) viewCh = "all";  // 选中通道已消失
+    nav.appendChild(el("span","lbl","通道"));
+    const add = (key, label, idTxt)=>{
+      const t = el("span","tab"+(viewCh===key?" on":""));
+      const d = el("span","dot");
+      t.appendChild(d);
+      t.appendChild(el("span","", label));
+      if(idTxt) t.appendChild(el("span","id", idTxt));
+      t.onclick = ()=>{ viewCh = key; applyView(); };
+      nav.appendChild(t);
+      tabRefs.set(key, {tab:t, dot:d});
+    };
+    add("all","全部","");
+    channels.forEach(c=> add(c.id, c.name || c.id, c.id));
+  }
+  channels.forEach(c=>{
+    const r = tabRefs.get(c.id); if(!r) return;
+    r.dot.className = "dot " + (c.online ? "ok" : "bad");
+  });
+  applyView();
+}
+
+function applyView(){
+  const single = viewCh !== "all";
+  document.body.classList.toggle("view-single", single);
+  tabRefs.forEach((r,key)=> r.tab.classList.toggle("on", key===viewCh));
+  cards.forEach((ref,id)=>{
+    const vis = !single || id === viewCh;
+    // 隐藏期间 canvas 的 clientWidth 为 0，位图尺寸会塌成 1px；
+    // 所以"初次可见"和"由隐转显"时必须重算一次位图尺寸并重绘。
+    if(vis && ref._vis !== true) ref.view.fit();
+    ref._vis = vis;
+    ref.card.classList.toggle("is-active", vis);
+    // 单通道视图屏幕是空的 → 自动展开详情看诊断；
+    // 多路总览时收起，保证四路一屏放得下（演示要"一眼看全"）。
+    if(ref.detail && !ref._userToggled){
+      ref.detail.classList.toggle("open", single);
+      if(ref.bDetail) ref.bDetail.textContent = single ? "收起详情 ▴" : "展开详情 ▾";
+    }
+  });
+}
+
+/* ── 数据接入：SSE，失败自动退回轮询 ── */
+let es = null, pollTimer = null;
+
+/* ★ 实时帧的重绘合并（2026-09 现场问题：看板刷新太快，什么都看不清）
+   后端已经把 state 推送节流到 service.state_push_hz（默认 2Hz），这里再兜一层：
+     · 同一动画帧内到达的多条 state 只画最后一条；
+     · 页面切到后台（document.hidden）时完全不画 —— 浏览器本来也不会刷新，
+       但 JSON 解析和 DOM 操作照样烧 CPU，四路同屏时很可观；
+     · 被"通道切换"隐藏起来的卡片也不画（数据仍在后台更新，切回去就是最新的）。 */
+const pendingRender = new Map();
+let renderTimer = 0;
+function queueRender(c){
+  pendingRender.set(c.id, c);
+  if(renderTimer) return;
+  renderTimer = setTimeout(()=>{
+    renderTimer = 0;
+    const list = [...pendingRender.values()];
+    pendingRender.clear();
+    if(document.hidden) return;      // 页面在后台：不画（切回来时下一条推送就补上）
+    for(const ch of list){
+      const ref = cards.get(ch.id);
+      if(ref && ref._vis === false) continue;                   // 没显示就别画（见 applyView）
+      renderChannel(ch, true);                                  // 轻量刷新
+    }
+  }, 60);
+}
+// 从后台切回前台：立刻补一次全量，免得停在切走时的旧画面上等下一条推送
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refresh(); });
+
+function applySnapshot(snap){
+  lastSnapshot = snap;
+  document.getElementById("h-ch").textContent = snap.service.channels;
+  document.getElementById("h-on").textContent = snap.service.online;
+  document.getElementById("h-saved").textContent = snap.service.saved_total;
+  document.getElementById("h-uptime").textContent = "运行 " + fmt(snap.service.uptime,0) + " s";
+  const stEl = document.getElementById("h-status");
+  stEl.className = "dot " + (snap.service.online>0 ? "ok" : "bad");
+  let stxt = snap.service.online>0 ? ("实时连接 · " + snap.service.subscribers + " 个看板")
+                                   : "无在线通道";
+  // 多雷达：显示共享接收点的总包率与"未登记源"告警
+  const hub = snap.hub;
+  if(hub && hub.received !== undefined){
+    stxt += "　·　接收 " + hub.bind + "　" + fmt(hub.pkt_rate,0) + " 包/s";
+    if(hub.unknown > 0) stxt += "　⚠ 未登记源 " + hub.unknown;
+    if(hub.error) stxt += "　✕ " + hub.error;
+  }
+  document.getElementById("h-status-t").textContent = stxt;
+  // 是否仿真源 → 决定"演示"按钮可用性
+  const anySim = snap.channels.some(c=>c.source_kind==="sim-radar");
+  document.getElementById("btn-demo").disabled = !anySim;
+  (snap.channels||[]).forEach(c=>renderChannel(c));   // 注意不能直接传 renderChannel：forEach 的第二参会变成 light
+  renderTabs(snap.channels || []);
+  document.getElementById("btn-demo").dataset.loaded =
+    (snap.channels[0] && snap.channels[0].source && snap.channels[0].source.loaded) ? "1" : "0";
+
+  // ── 演示模式横幅与自动演示开关 ──
+  const nSim = snap.service.sim_channels || 0;
+  const nLive = snap.service.live_channels || 0;
+  const dir = snap.director;
+  const pill = document.getElementById("h-demo");
+  if(nSim > 0){
+    pill.style.display = "";
+    pill.className = "pill";
+    if(dir){
+      const auto = !!dir.auto;
+      if(auto){
+        pill.textContent = "演示模式 · " + nSim + " 路仿真雷达 · 自动编排中";
+        pill.className = "pill warn-pill";
+      }else{
+        pill.textContent = "演示模式 · " + nSim + " 路仿真雷达 · 编排已暂停";
+        pill.className = "pill";
+      }
+    }else{
+      pill.textContent = "演示模式 · " + nSim + " 路仿真雷达";
+      pill.className = "pill warn-pill";
+    }
+  }else{
+    pill.style.display = "none";
+  }
+  const bAuto = document.getElementById("btn-auto");
+  bAuto.disabled = !dir;
+  bAuto.textContent = dir ? ("自动演示：" + (dir.auto ? "开" : "关")) : "自动演示：不可用";
+  bAuto.title = dir ? ("周期 " + dir.cycle_sec + " s：空场等待 → 车辆驶入 → 停稳测量 → 车辆驶离；"
+                       + "手动点过「演示」或「强制重测」会自动暂停，点这里恢复")
+                    : "本次启动不是演示模式（用「启动演示版（4路仿真）.vbs」或 --demo 启动）";
+
+  const bd = document.getElementById("banner-demo");
+  if(nSim > 0 && nLive === 0){
+    bd.innerHTML = "<br><b>当前为演示模式：</b>四路雷达信号由仿真生成（造真实格式的 UDP 报文再解码，"
+      + "链路与现场一致），<b>尚未接入真实雷达硬件</b>。车辆会自动驶入 / 停稳 / 出结论 / 驶离，循环不停。";
+  }else if(nSim > 0){
+    bd.innerHTML = "<br>本机同时有 <b>" + nLive + " 路真雷达</b> 与 <b>" + nSim
+      + " 路仿真</b>；卡片上的「仿真雷达」徽标即表示该路数据是模拟的。";
+  }else{
+    bd.innerHTML = " 若通道处于 <code>simulate</code> 仿真模式，"
+      + "「演示：空车/载货」按钮会切换场景并各触发一次完整检测；接真雷达后该按钮会自动置灰。";
+  }
+}
+
+function startPolling(){
+  if(pollTimer) return;
+  pollTimer = setInterval(async ()=>{
+    try{
+      const r = await fetch("/api/state", {cache:"no-store"});
+      applySnapshot(await r.json());
+    }catch(e){ /* 忽略，下一轮再试 */ }
+  }, 1500);
+}
+
+function connect(){
+  try{ es = new EventSource("/api/events"); }
+  catch(e){ startPolling(); return; }
+  es.addEventListener("snapshot", ev=>applySnapshot(JSON.parse(ev.data)));
+  ["state","result","result_pending","result_history","result_archive","session_start","session_end","warn","error","plate_miss",
+   "skip_save","channel_online","channel_offline","service_start","service_stop",
+   "demo_phase"].forEach(kind=>{
+    es.addEventListener(kind, ev=>{
+      const e = JSON.parse(ev.data);
+      if(kind==="result"){
+        logAdd(kind, (e.channel||"") + "　车牌 " + (e.plate||"–") + "　" +
+               (e.empty?"空车":"非空") + "　" + (e.reason||"") +
+               "　点数 " + e.n_points + "　偏差 " + fmt(e.deviation,4) +
+               "　" + e.elapsed_ms + "ms");
+        // 结果里带 faces/cloud，直接局部刷新该卡片
+        const c = (lastSnapshot && lastSnapshot.channels || []).find(x=>x.id===e.channel);
+        if(c){ Object.assign(c, {last_result:e, last_plate:e.plate,
+                last_reason:e.reason, cloud:e.cloud, last_diag:e.diagnostics||{}});
+               const rr = cards.get(e.channel); if(rr) rr._srvNow = e.ts;
+               renderChannel(c); }
+        else refresh();
+      }else if(kind==="result_pending"){
+        logAdd("info", (e.channel||"") + " 测量 " + e.measurement_id + " 已计算，等待持久化");
+      }else if(kind==="result_archive" || kind==="result_history"){
+        logAdd("info", (e.channel||"") + " 测量 " + e.measurement_id +
+               (kind==="result_archive" ? " 成套云图已保存" : " 历史补交完成"));
+        // 补交按测量 ID 更新服务器历史；不把 A 的迟到事件当作 B 的当前结果。
+        refresh();
+      }else if(kind==="state"){
+        const c = (lastSnapshot && lastSnapshot.channels || []).find(x=>x.id===e.channel);
+        if(c){ c.stability = e.stability; c.cloud = e.cloud; c.fps = e.fps;
+               c.frames = e.frames; c.last_plate = e.plate || c.last_plate;
+               c.error = e.error || ""; c.session = e.session;
+               c.health = e.health || "";
+               // 服务端时钟：用来算"这条结论是多久以前的"（别用浏览器本地时间）
+               const rr = cards.get(e.channel); if(rr) rr._srvNow = e.ts;
+               // 链路实况（包率/转速/包每圈/兜底计数）跟着每次推送更新 ——
+               // 只靠快照的话，雷达中途掉线在看板上是看不出来的。
+               if(e.link){ c.source = Object.assign({}, c.source || {}, e.link); }
+               if(!c.last_result || !c.last_result.reason){ c.last_diag = {n_points:e.n_points}; }
+               queueRender(c); }
+      }else if(kind==="error"){
+        logAdd(kind, (e.channel||"") + " " + (e.error||"") );
+      }else if(kind==="warn"){
+        logAdd(kind, (e.channel||"") + " " + (e.message||""));
+      }else if(kind==="plate_miss"){
+        logAdd(kind, (e.channel||"") + " 未取到车牌：" + (e.error||""));
+      }else if(kind==="session_start"){
+        logAdd(kind, (e.channel||"") + " 会话 #" + e.session + " 开始，点数 " + e.n_points);
+      }else if(kind==="session_end"){
+        logAdd(kind, (e.channel||"") + " 会话 #" + e.session + " 结束，存盘 " + e.saved + " 次");
+      }else if(kind==="skip_save"){
+        logAdd(kind, (e.channel||"") + " 点数不足未存盘：" + e.n_points + " < " + e.need);
+      }else if(kind==="demo_phase"){
+        logAdd("demo", (e.channel||"") + " 第" + ((e.cycle|0)+1) + "趟 · " + (e.phase||"") +
+               "（" + (e.loaded ? "载货" : "空车") + "，位置 " + fmt(e.y_offset,1) + " m）");
+      }else{
+        logAdd(kind, JSON.stringify(e).slice(0,200));
+      }
+    });
+  });
+  es.onerror = ()=>{ 
+    document.getElementById("h-status").className="dot warn";
+    document.getElementById("h-status-t").textContent="连接中断，重试中…";
+    startPolling();
+  };
+  es.onopen = ()=>{
+    if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+    document.getElementById("h-status").className="dot ok";
+    document.getElementById("h-status-t").textContent="实时已连接";
+  };
+}
+
+async function refresh(){
+  try{ applySnapshot(await (await fetch("/api/state",{cache:"no-store"})).json()); }
+  catch(e){}
+}
+
+/* ── 按钮 ── */
+/* 自动演示开关：开着时四路仿真通道按时间线自己演（车辆驶入 → 停稳 → 出结论 → 驶离）。
+   手动点过「演示：空车/载货」或「强制重测」之后编排器会自动暂停，点这里恢复。 */
+document.getElementById("btn-auto").onclick = async function(){
+  const dir = lastSnapshot && lastSnapshot.director;
+  const want = !(dir && dir.auto);
+  const r = await fetch("/api/demo/auto", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({enabled: want})});
+  if(!r.ok){ logAdd("warn","自动演示开关失败：" + (await r.text()).slice(0,150)); return; }
+  logAdd("warn","自动演示已" + (want ? "开启" : "关闭"));
+  refresh();
+};
+
+document.getElementById("btn-demo").onclick = async function(){
+  const loaded = this.dataset.loaded === "1";
+  const target = !loaded;
+  const chans = (lastSnapshot && lastSnapshot.channels || [])
+      .filter(c=>c.source_kind==="sim-radar").map(c=>c.id);
+  if(!chans.length){ logAdd("warn","没有仿真通道，无法切换演示场景"); return; }
+  for(const id of chans){
+    await fetch("/api/demo/loaded", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({channel:id, loaded:target})});
+  }
+  this.dataset.loaded = target ? "1" : "0";
+  this.textContent = "演示：" + (target ? "载货" : "空车");
+  logAdd("warn", "已切换演示场景为「" + (target?"载货":"空车") + "」，等待车辆停稳触发检测"
+                 + "（自动演示已暂停，点「自动演示」可恢复）");
+  refresh();
+};
+
+document.getElementById("btn-force").onclick = async ()=>{
+  await fetch("/api/demo/force", {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:"{}"});
+  logAdd("warn","已强制开新会话，重置停稳检测器（自动演示已暂停，点「自动演示」可恢复）");
+  refresh();
+};
+
+document.getElementById("btn-config").onclick = async ()=>{
+  const cfg = await (await fetch("/api/config",{cache:"no-store"})).json();
+  const w = window.open("", "_blank");
+  if(!w){ logAdd("warn","浏览器拦截了新窗口"); return; }
+  w.document.write('<pre style="font:13px/1.6 monospace;padding:16px;white-space:pre-wrap">'+
+    JSON.stringify(cfg,null,2).replace(/[<>&]/g,s=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[s]))+'</pre>');
+  w.document.title = "生效配置";
+};
+
+/* ── 启动 ── */
+refresh().then(connect);
+logAdd("info","看板已加载。后端为离线自包含服务，无外部依赖。");
+</script>
+</body>
+</html>

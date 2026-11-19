@@ -1,0 +1,6 @@
+numpy
+open3d
+scipy
+fastapi
+uvicorn
+threadpoolctl

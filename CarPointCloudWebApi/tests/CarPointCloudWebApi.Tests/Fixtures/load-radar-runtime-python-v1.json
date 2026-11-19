@@ -1,0 +1,47 @@
+{
+  "description": "由真实RuntimeEvents源码生成的纯内存契约夹具；未启动设备、服务或数据库",
+  "channel": {
+    "id": "CH1",
+    "online": true,
+    "frame_age_sec": 0.1,
+    "cloud": [],
+    "runtime_events": [
+      {
+        "event_id": "729e94b4f2cc4433ba3ac63930b26f46:1",
+        "channel": "CH1",
+        "session": 1,
+        "ts": 1700000000.0,
+        "kind": "vehicle_detected",
+        "message": "检测到车辆，等待连续停稳",
+        "source": "live"
+      },
+      {
+        "event_id": "729e94b4f2cc4433ba3ac63930b26f46:2",
+        "channel": "CH1",
+        "session": 1,
+        "ts": 1700000005.0,
+        "kind": "vehicle_stable",
+        "message": "车辆已停稳",
+        "source": "live"
+      },
+      {
+        "event_id": "729e94b4f2cc4433ba3ac63930b26f46:3",
+        "channel": "CH1",
+        "session": 1,
+        "ts": 1700000005.0,
+        "kind": "settling",
+        "message": "开始沉降观测，等待连续完整新帧",
+        "source": "live"
+      },
+      {
+        "event_id": "729e94b4f2cc4433ba3ac63930b26f46:4",
+        "channel": "CH1",
+        "session": 1,
+        "ts": 1700000006.0,
+        "kind": "preparation_wait",
+        "message": "车辆已停稳，等待本车车牌确认",
+        "source": "live"
+      }
+    ]
+  }
+}

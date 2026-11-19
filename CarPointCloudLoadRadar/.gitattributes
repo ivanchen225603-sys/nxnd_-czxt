@@ -1,0 +1,25 @@
+# 本文件只作用于 CarPointCloudLoadRadar/ 这一棵树，不影响同仓的三个 C# 项目。
+#
+# ★ 为什么必须有它（2026-09-22 实测）
+# 回归闸门 `cli/verify.py` 的全部效力来自 `baseline/` 那 21 个文件的 SHA-256
+# （记在 `baseline/MANIFEST.json`）。而 Windows 上 git 默认 `core.autocrlf=true`，
+# 检出时会把 LF 改成 CRLF —— 实测一次全新检出：
+#     10 份 .reason.txt 每份多 1 字节、MANIFEST.json 多 87 字节，
+#     11/21 个文件的哈希全变，`cli/verify.py` 的清单核对直接失败。
+# 而 CLAUDE.md 写明清单正是用来拦「CRLF 重写」的 —— 于是闸门会因为
+# **与代码无关**的原因报红，换台机器克隆就复现。
+#
+# 目标平台是麒麟 V10 / Linux，仓库里现存文件也全是 LF，所以统一钉成 LF。
+
+# 默认：文本一律以 LF 检出，杜绝跨平台换行漂移
+* text=auto eol=lf
+
+# ★ 回归基线**逐字节**参与哈希核对，任何转换都不许做
+baseline/** -text
+
+# 二进制：点云、numpy 数组、归档库
+*.xyz  binary
+*.npy  binary
+*.npz  binary
+*.sqlite3 binary
+*.bin  binary

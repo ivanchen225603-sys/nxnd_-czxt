@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>体积查询 - 车载雷达点云系统</title>
+    <link rel="stylesheet" href="css/style.css?v=8">
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
+    <link rel="stylesheet" href="css/volume-query.css?v=20261102-1">
+</head>
+<body class="volume-query-page">
+    <nav id="global-nav" class="global-nav" aria-label="主导航">
+        <a class="nav-brand" href="live.html">
+            <img class="ui-icon" src="vendor/tabler-icons/radar-2.svg" alt="" aria-hidden="true">
+            <span class="nav-title">车载雷达点云系统<span class="brand-caption">车辆测量工作台</span></span>
+        </a>
+        <div class="nav-account">
+            <span id="navRole">当前用户</span><span id="navUser"></span>
+            <a href="#" id="navLogout" title="退出登录">退出</a>
+        </div>
+        <div class="nav-links">
+            <span class="nav-group">现场作业</span>
+            <a href="live.html" class="nav-link"><img class="ui-icon" src="vendor/tabler-icons/antenna.svg" alt="" aria-hidden="true">空车尺寸测量</a>
+            <a href="load-radar.html" class="nav-link" data-role="admin,viewer"><img class="ui-icon" src="vendor/tabler-icons/cube.svg" alt="" aria-hidden="true">载货体积</a>
+            <a href="index.html" class="nav-link"><img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">空车档案</a>
+            <span class="nav-group management">管理</span>
+            <a href="volume-query.html" class="nav-link active" aria-current="page" data-role="admin,viewer"><img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">体积查询</a>
+            <a href="logs.html" class="nav-link"><img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true">日志</a>
+            <a href="users.html" class="nav-link" data-role="admin"><img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">用户管理</a>
+        </div>
+    </nav>
+    <div id="main-layout">
+        <main class="volume-workspace">
+            <header class="volume-heading">
+                <h1><img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">体积查询</h1>
+                <p>按日期、车牌和通道查询车辆体积记录。</p>
+            </header>
+            <section class="volume-panel" aria-labelledby="filterTitle">
+                <h2 id="filterTitle">查询条件</h2>
+                <form id="volumeQueryForm" class="volume-filters">
+                    <div class="filter-group"><label for="startDate">开始日期</label><input id="startDate" name="startDate" type="date" required></div>
+                    <div class="filter-group"><label for="endDate">结束日期</label><input id="endDate" name="endDate" type="date" required></div>
+                    <div class="filter-group"><label for="licensePlate">车牌号</label><input id="licensePlate" name="licensePlate" type="text" maxlength="64" placeholder="输入完整车牌号" autocomplete="off"></div>
+                    <div class="filter-group"><label for="channelId">通道</label><select id="channelId" name="channelId"><option value="" selected>全部</option><option value="CH1">1号磅（CH1）</option><option value="CH2">2号磅（CH2）</option><option value="CH3">3号磅（CH3）</option><option value="CH4">4号磅（CH4）</option></select></div>
+                    <div class="volume-filter-actions">
+                        <button type="submit" class="primary-btn" id="queryButton"><img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">查询</button>
+                        <button type="button" class="ghost-btn" id="resetButton">重置</button>
+                    </div>
+                </form>
+                <p id="queryError" class="volume-error" role="alert" hidden></p>
+            </section>
+            <section class="volume-panel volume-results" aria-labelledby="resultsTitle" aria-busy="false" id="volumeResults">
+                <div class="volume-results-heading"><h2 id="resultsTitle">查询结果</h2><span>体积单位：立方米（m³）</span></div>
+                <div class="volume-table-scroll" role="region" aria-label="车辆体积列表，可横向滚动" tabindex="0">
+                    <table class="volume-table"><thead><tr><th scope="col">采集时间</th><th scope="col">车牌号</th><th scope="col">几号磅</th><th scope="col" class="volume-number">体积（立方米）</th></tr></thead><tbody id="volumeTableBody"></tbody></table>
+                    <div id="volumeEmpty" class="volume-empty" role="status">正在加载体积记录…</div>
+                </div>
+                <nav class="volume-pagination" aria-label="体积记录分页">
+                    <span id="pageInfo" role="status" aria-live="polite">正在查询…</span>
+                    <div class="volume-page-actions">
+                        <label for="pageSize">每页<select id="pageSize"><option value="10" selected>10 条</option><option value="20">20 条</option><option value="50">50 条</option></select></label>
+                        <button type="button" class="ghost-btn" id="previousPage" disabled>上一页</button>
+                        <button type="button" class="ghost-btn" id="nextPage" disabled>下一页</button>
+                    </div>
+                </nav>
+            </section>
+        </main>
+    </div>
+    <script src="js/api-config.js?v=1"></script>
+    <script src="js/auth-guard.js"></script>
+    <script src="js/api-client.js?v=2"></script>
+    <script src="js/nav.js?v=20261012-1"></script>
+    <script src="js/volume-query.js?v=20261102-1"></script>
+</body>
+</html>

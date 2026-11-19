@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────
+# CarPointCloudLoadRadar 专属忽略规则
+#
+# 仓库根的 .gitignore 已经覆盖 __pycache__ / data / logs / bin 等。
+# ★ 本项目**不需要**给 bin/ 开例外 —— 现场工具目录叫 cli/，
+#   正是为了不跟仓库「bin/ 视为生成物」这条约定打架。
+# ★ baseline/ **必须被跟踪**：回归闸门 cli/verify.py 的全部效力
+#   都来自那 10 份原版点云 + reason.txt + MANIFEST.json。
+#   它刻意不叫 data/，就是为了绕开根规则里的 **/data/。
+# ─────────────────────────────────────────────────────────────────
+
+# 现场凭据：node 机器密钥。只提交 .example
+/config/webapi.json
+
+# 体积物理参数：绑定某一份具体的空车基线（7 个 sha256），一机一份
+/config/volume-provider.json
+
+# 改配置时的临时备份
+/config/*.bak-*
+
+# 空车基线本体（每台机现场标定，不是代码）
+/data/in/

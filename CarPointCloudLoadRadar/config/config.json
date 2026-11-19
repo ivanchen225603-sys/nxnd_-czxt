@@ -1,0 +1,102 @@
+{
+  "network": {
+    "udp_port": 2368,
+    "tcp_port": 9347,
+    "bind_ip": "0.0.0.0"
+  },
+  "packet": {
+    "size": 1100,
+    "channels": 128,
+    "angle_bins": 900,
+    "imu_warmup": 1000,
+    "angle1_offset": 12,
+    "angle2_offset": 526,
+    "block1_data_offset": 14,
+    "block2_data_offset": 528,
+    "point_size": 4,
+    "imu_offset": 1054,
+    "imu_acc_x_offset": 30,
+    "imu_acc_y_offset": 32,
+    "imu_acc_z_offset": 34,
+    "angle_bin_size": 40
+  },
+  "processing": {
+    "offset_r": 15.640617,
+    "distance_scale": 4.0,
+    "angle_scale": 0.01,
+    "deg_to_rad": 0.017453292519943295,
+    "yaw_offset_deg": -183.0,
+    "min_distance_mm": 100.0
+  },
+  "roi": {
+    "x": [
+      -2,
+      2
+    ],
+    "y": [
+      -11,
+      8
+    ],
+    "z": [
+      -6,
+      -0.75
+    ]
+  },
+  "detection": {
+    "detect_interval": 0.5,
+    "ground_z": -5.23,
+    "vehicle_threshold": 15000,
+    "stability_delta": 0.05,
+    "stable_save_max": 1,
+    "vehicle_min_height_m": 0.3,
+    "vehicle_release_ratio": 0.8,
+    "stability_release_frames": 3,
+    "stability_break_ratio": 6.0,
+    "stability_count_ratio": 0.03,
+    "stationary_shape_speed_mps": 0.10,
+    "stationary_yaw_speed_mps": 0.10,
+    "settle_sec": 3.0,
+    "settle_accumulate": false,
+    "settle_max_frames": 60
+  },
+  "detect_empty": {
+    "heading": {
+      "pct": 15.0,
+      "min_correction": 0.005
+    },
+    "floor": {
+      "distance_threshold": 0.015,
+      "z_percentile": 30,
+      "normal_z_threshold": 0.99,
+      "max_iterations": 10,
+      "expand_ratio": 2.0,
+      "y_trim_gap_m": 1.5
+    },
+    "roof": {
+      "distance_threshold": 0.01,
+      "z_percentile_hi": 10,
+      "y_percentile_rear": 80
+    },
+    "wall": {
+      "distance_threshold": 0.015,
+      "percentile": 30
+    },
+    "left_wall": {
+      "x_range": [
+        -1.0,
+        0.0
+      ]
+    },
+    "right_wall": {
+      "x_range": [
+        0.0,
+        1.0
+      ]
+    },
+    "overhang": {
+      "z_margin": 0.1,
+      "gap": 0.1,
+      "min_points": 20
+    }
+  }
+}

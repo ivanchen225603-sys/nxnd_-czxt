@@ -1,0 +1,643 @@
+{
+  "CH1": {
+    "target": {
+      "id": "229826a5c1c2b2dc10e20df7dc3b10506d1db4054b625f86fb578ba0fb9ff844",
+      "activationId": 17,
+      "original": {
+        "passageKey": "8bb56cfcd19f36fb48137cc95f629f33b1f648ae8383f6d16955b7b930c7d3f7",
+        "payloadHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "receivedAt": "2026-10-21T12:00:01+00:00",
+        "measurement": {
+          "algorithmVersion": "test-algorithm",
+          "baselineCandidateSha256": null,
+          "baselineVersionId": null,
+          "boundSpread": null,
+          "calibrationId": "cal-1",
+          "channelId": "CH1",
+          "configurationHash": "23083999e5e49f1ad7a266a1064d6df2764175086df49258e5fa3d26d3710d2f",
+          "filledRatio": 0.0,
+          "frameDegraded": false,
+          "holeRatio": 0.0,
+          "measuredAt": "2026-10-21T12:00:00.200000Z",
+          "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+          "measurementId": "original-CH1",
+          "measurementStartedAt": "2026-10-21T12:00:00Z",
+          "nodeId": "test-node",
+          "passageId": "passage-CH1",
+          "pointCount": 2400,
+          "points": [
+            [
+              -1.149999976158142,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -1.0499999523162842,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -0.949999988079071,
+              -4.949999809265137,
+              -3.4000000953674316
+            ]
+          ],
+          "reason": "解析载重平面夹具",
+          "sourceMode": "live",
+          "verdict": "loaded",
+          "volumeM3": null,
+          "volumeStatus": "unavailable"
+        },
+        "binding": {
+          "passageKey": "8bb56cfcd19f36fb48137cc95f629f33b1f648ae8383f6d16955b7b930c7d3f7",
+          "licensePlate": "宁A05922F",
+          "workflowId": "workflow-CH1",
+          "cameraIdentifier": "CAM_001",
+          "vehicleIdentity": "plate:宁A05922F",
+          "actor": "fixture",
+          "reason": "解析夹具",
+          "boundAt": "2026-10-21T13:00:00+00:00"
+        }
+      },
+      "baseline": {
+        "versionId": "afternoon-ch4",
+        "channelId": "CH4",
+        "licensePlate": "宁A05922F",
+        "nodeId": "test-node",
+        "scopeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "calibrationId": "cal-4",
+        "vehicleIdentity": "plate:宁A05922F",
+        "measurementId": "empty-ch4",
+        "actor": "fixture",
+        "reason": "解析CH4空车",
+        "createdAt": "2026-10-21T13:00:00+00:00",
+        "activatedAt": "2026-10-21T13:00:00+00:00",
+        "active": true,
+        "assetSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366"
+      },
+      "baselineSource": {
+        "measurementId": "empty-ch4",
+        "nodeId": "test-node",
+        "passageId": "empty-passage",
+        "algorithmVersion": "test-algorithm",
+        "pointCount": 2400,
+        "points": [],
+        "channelId": "CH4",
+        "calibrationId": "cal-4",
+        "configurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sourceMode": "live",
+        "verdict": "empty",
+        "frameDegraded": false,
+        "baselineCandidateSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366",
+        "measuredAt": "2026-10-21T13:00:00+00:00"
+      }
+    },
+    "request": {
+      "activationId": 17,
+      "baselineVersionId": "afternoon-ch4",
+      "id": "229826a5c1c2b2dc10e20df7dc3b10506d1db4054b625f86fb578ba0fb9ff844",
+      "measurement": {
+        "algorithmVersion": "test-algorithm",
+        "baselineCandidateSha256": null,
+        "baselineUse": {
+          "dxM": 0.0,
+          "dyM": 0.0,
+          "policy": "ch4-shared-v1",
+          "pose": null,
+          "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+          "registrationStatus": "baseline_fallback",
+          "sourceCalibrationId": "cal-4",
+          "sourceChannelId": "CH4",
+          "sourceConfigurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "yawPivotYM": 0.0,
+          "yawSlope": 0.0
+        },
+        "baselineVersionId": "afternoon-ch4",
+        "boundSpread": null,
+        "calibrationId": "cal-1",
+        "channelId": "CH1",
+        "configurationHash": "23083999e5e49f1ad7a266a1064d6df2764175086df49258e5fa3d26d3710d2f",
+        "filledRatio": 0.0,
+        "frameDegraded": false,
+        "holeRatio": 0.0,
+        "measuredAt": "2026-10-21T12:00:00.200000Z",
+        "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+        "measurementId": "original-CH1",
+        "measurementStartedAt": "2026-10-21T12:00:00Z",
+        "nodeId": "test-node",
+        "passageId": "passage-CH1",
+        "pointCount": 2400,
+        "points": [
+          [
+            -1.149999976158142,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -1.0499999523162842,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -0.949999988079071,
+            -4.949999809265137,
+            -3.4000000953674316
+          ]
+        ],
+        "reason": "解析载重平面夹具",
+        "sourceMode": "live",
+        "verdict": "loaded",
+        "volumeM3": 9.10799620294589,
+        "volumeStatus": "success"
+      },
+      "measurementId": "original-CH1",
+      "provenance": {
+        "calculationAlgorithmSha256": "8919fa57090697976490ab92a0411cc98b0a26aaee421657423ffb0299c26543",
+        "exitFramesSha256": "2ac0a74c84218685193184e7b18963e5ff2b14ac42146d8b70282e7d6e23110f",
+        "inputSha256": "fa41a548ac0f4571fce73092ae8df1b030b95c708cd91e299370328623c91546",
+        "originalAlgorithmSha256": "44e341a40a6294fde1dc0fdeb0833d1e4e3a66223356ea162994681bec5a8c0e"
+      }
+    }
+  },
+  "CH2": {
+    "target": {
+      "id": "7e7441ee338db2db39e25a9a46dabb220d45c3e2581d05b0d23c1d15b95e1db5",
+      "activationId": 17,
+      "original": {
+        "passageKey": "a0ade10252870925dca4105614794311ebf944b03094acf29a5c977bf97b15ad",
+        "payloadHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "receivedAt": "2026-10-21T12:00:01+00:00",
+        "measurement": {
+          "algorithmVersion": "test-algorithm",
+          "baselineCandidateSha256": null,
+          "baselineVersionId": null,
+          "boundSpread": null,
+          "calibrationId": "cal-2",
+          "channelId": "CH2",
+          "configurationHash": "1f875d8d818d38b6827924b48b04a185df8152af389185155c4f655debd95853",
+          "filledRatio": 0.0,
+          "frameDegraded": false,
+          "holeRatio": 0.0,
+          "measuredAt": "2026-10-21T12:00:00.200000Z",
+          "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+          "measurementId": "original-CH2",
+          "measurementStartedAt": "2026-10-21T12:00:00Z",
+          "nodeId": "test-node",
+          "passageId": "passage-CH2",
+          "pointCount": 2400,
+          "points": [
+            [
+              -1.149999976158142,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -1.0499999523162842,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -0.949999988079071,
+              -4.949999809265137,
+              -3.4000000953674316
+            ]
+          ],
+          "reason": "解析载重平面夹具",
+          "sourceMode": "live",
+          "verdict": "loaded",
+          "volumeM3": null,
+          "volumeStatus": "unavailable"
+        },
+        "binding": {
+          "passageKey": "a0ade10252870925dca4105614794311ebf944b03094acf29a5c977bf97b15ad",
+          "licensePlate": "宁A05922F",
+          "workflowId": "workflow-CH2",
+          "cameraIdentifier": "CAM_002",
+          "vehicleIdentity": "plate:宁A05922F",
+          "actor": "fixture",
+          "reason": "解析夹具",
+          "boundAt": "2026-10-21T13:00:00+00:00"
+        }
+      },
+      "baseline": {
+        "versionId": "afternoon-ch4",
+        "channelId": "CH4",
+        "licensePlate": "宁A05922F",
+        "nodeId": "test-node",
+        "scopeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "calibrationId": "cal-4",
+        "vehicleIdentity": "plate:宁A05922F",
+        "measurementId": "empty-ch4",
+        "actor": "fixture",
+        "reason": "解析CH4空车",
+        "createdAt": "2026-10-21T13:00:00+00:00",
+        "activatedAt": "2026-10-21T13:00:00+00:00",
+        "active": true,
+        "assetSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366"
+      },
+      "baselineSource": {
+        "measurementId": "empty-ch4",
+        "nodeId": "test-node",
+        "passageId": "empty-passage",
+        "algorithmVersion": "test-algorithm",
+        "pointCount": 2400,
+        "points": [],
+        "channelId": "CH4",
+        "calibrationId": "cal-4",
+        "configurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sourceMode": "live",
+        "verdict": "empty",
+        "frameDegraded": false,
+        "baselineCandidateSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366",
+        "measuredAt": "2026-10-21T13:00:00+00:00"
+      }
+    },
+    "request": {
+      "activationId": 17,
+      "baselineVersionId": "afternoon-ch4",
+      "id": "7e7441ee338db2db39e25a9a46dabb220d45c3e2581d05b0d23c1d15b95e1db5",
+      "measurement": {
+        "algorithmVersion": "test-algorithm",
+        "baselineCandidateSha256": null,
+        "baselineUse": {
+          "dxM": 0.0,
+          "dyM": 0.0,
+          "policy": "ch4-shared-v1",
+          "pose": null,
+          "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+          "registrationStatus": "baseline_fallback",
+          "sourceCalibrationId": "cal-4",
+          "sourceChannelId": "CH4",
+          "sourceConfigurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "yawPivotYM": 0.0,
+          "yawSlope": 0.0
+        },
+        "baselineVersionId": "afternoon-ch4",
+        "boundSpread": null,
+        "calibrationId": "cal-2",
+        "channelId": "CH2",
+        "configurationHash": "1f875d8d818d38b6827924b48b04a185df8152af389185155c4f655debd95853",
+        "filledRatio": 0.0,
+        "frameDegraded": false,
+        "holeRatio": 0.0,
+        "measuredAt": "2026-10-21T12:00:00.200000Z",
+        "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+        "measurementId": "original-CH2",
+        "measurementStartedAt": "2026-10-21T12:00:00Z",
+        "nodeId": "test-node",
+        "passageId": "passage-CH2",
+        "pointCount": 2400,
+        "points": [
+          [
+            -1.149999976158142,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -1.0499999523162842,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -0.949999988079071,
+            -4.949999809265137,
+            -3.4000000953674316
+          ]
+        ],
+        "reason": "解析载重平面夹具",
+        "sourceMode": "live",
+        "verdict": "loaded",
+        "volumeM3": 9.10799620294589,
+        "volumeStatus": "success"
+      },
+      "measurementId": "original-CH2",
+      "provenance": {
+        "calculationAlgorithmSha256": "8919fa57090697976490ab92a0411cc98b0a26aaee421657423ffb0299c26543",
+        "exitFramesSha256": "2ac0a74c84218685193184e7b18963e5ff2b14ac42146d8b70282e7d6e23110f",
+        "inputSha256": "6ef917f5b87621d56983a98f22cdd40dff2ef12113660e5e6e85b29d9b805db2",
+        "originalAlgorithmSha256": "44e341a40a6294fde1dc0fdeb0833d1e4e3a66223356ea162994681bec5a8c0e"
+      }
+    }
+  },
+  "CH3": {
+    "target": {
+      "id": "b88df5b17e0348daa016ef59800a53b78b53b913b83c236b666a5e9f79bf80e8",
+      "activationId": 17,
+      "original": {
+        "passageKey": "e78f0b942eda05fb79328c596198471e11b54ad4a7c776bbb4b9a74faa52d38e",
+        "payloadHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "receivedAt": "2026-10-21T12:00:01+00:00",
+        "measurement": {
+          "algorithmVersion": "test-algorithm",
+          "baselineCandidateSha256": null,
+          "baselineVersionId": null,
+          "boundSpread": null,
+          "calibrationId": "cal-3",
+          "channelId": "CH3",
+          "configurationHash": "2b0fbb86808ceddb9b53ee3f189af621b5696a210444894234a82ca8609ba0ee",
+          "filledRatio": 0.0,
+          "frameDegraded": false,
+          "holeRatio": 0.0,
+          "measuredAt": "2026-10-21T12:00:00.200000Z",
+          "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+          "measurementId": "original-CH3",
+          "measurementStartedAt": "2026-10-21T12:00:00Z",
+          "nodeId": "test-node",
+          "passageId": "passage-CH3",
+          "pointCount": 2400,
+          "points": [
+            [
+              -1.149999976158142,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -1.0499999523162842,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -0.949999988079071,
+              -4.949999809265137,
+              -3.4000000953674316
+            ]
+          ],
+          "reason": "解析载重平面夹具",
+          "sourceMode": "live",
+          "verdict": "loaded",
+          "volumeM3": null,
+          "volumeStatus": "unavailable"
+        },
+        "binding": {
+          "passageKey": "e78f0b942eda05fb79328c596198471e11b54ad4a7c776bbb4b9a74faa52d38e",
+          "licensePlate": "宁A05922F",
+          "workflowId": "workflow-CH3",
+          "cameraIdentifier": "CAM_003",
+          "vehicleIdentity": "plate:宁A05922F",
+          "actor": "fixture",
+          "reason": "解析夹具",
+          "boundAt": "2026-10-21T13:00:00+00:00"
+        }
+      },
+      "baseline": {
+        "versionId": "afternoon-ch4",
+        "channelId": "CH4",
+        "licensePlate": "宁A05922F",
+        "nodeId": "test-node",
+        "scopeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "calibrationId": "cal-4",
+        "vehicleIdentity": "plate:宁A05922F",
+        "measurementId": "empty-ch4",
+        "actor": "fixture",
+        "reason": "解析CH4空车",
+        "createdAt": "2026-10-21T13:00:00+00:00",
+        "activatedAt": "2026-10-21T13:00:00+00:00",
+        "active": true,
+        "assetSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366"
+      },
+      "baselineSource": {
+        "measurementId": "empty-ch4",
+        "nodeId": "test-node",
+        "passageId": "empty-passage",
+        "algorithmVersion": "test-algorithm",
+        "pointCount": 2400,
+        "points": [],
+        "channelId": "CH4",
+        "calibrationId": "cal-4",
+        "configurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sourceMode": "live",
+        "verdict": "empty",
+        "frameDegraded": false,
+        "baselineCandidateSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366",
+        "measuredAt": "2026-10-21T13:00:00+00:00"
+      }
+    },
+    "request": {
+      "activationId": 17,
+      "baselineVersionId": "afternoon-ch4",
+      "id": "b88df5b17e0348daa016ef59800a53b78b53b913b83c236b666a5e9f79bf80e8",
+      "measurement": {
+        "algorithmVersion": "test-algorithm",
+        "baselineCandidateSha256": null,
+        "baselineUse": {
+          "dxM": 0.0,
+          "dyM": 0.0,
+          "policy": "ch4-shared-v1",
+          "pose": null,
+          "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+          "registrationStatus": "baseline_fallback",
+          "sourceCalibrationId": "cal-4",
+          "sourceChannelId": "CH4",
+          "sourceConfigurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "yawPivotYM": 0.0,
+          "yawSlope": 0.0
+        },
+        "baselineVersionId": "afternoon-ch4",
+        "boundSpread": null,
+        "calibrationId": "cal-3",
+        "channelId": "CH3",
+        "configurationHash": "2b0fbb86808ceddb9b53ee3f189af621b5696a210444894234a82ca8609ba0ee",
+        "filledRatio": 0.0,
+        "frameDegraded": false,
+        "holeRatio": 0.0,
+        "measuredAt": "2026-10-21T12:00:00.200000Z",
+        "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+        "measurementId": "original-CH3",
+        "measurementStartedAt": "2026-10-21T12:00:00Z",
+        "nodeId": "test-node",
+        "passageId": "passage-CH3",
+        "pointCount": 2400,
+        "points": [
+          [
+            -1.149999976158142,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -1.0499999523162842,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -0.949999988079071,
+            -4.949999809265137,
+            -3.4000000953674316
+          ]
+        ],
+        "reason": "解析载重平面夹具",
+        "sourceMode": "live",
+        "verdict": "loaded",
+        "volumeM3": 9.10799620294589,
+        "volumeStatus": "success"
+      },
+      "measurementId": "original-CH3",
+      "provenance": {
+        "calculationAlgorithmSha256": "8919fa57090697976490ab92a0411cc98b0a26aaee421657423ffb0299c26543",
+        "exitFramesSha256": "2ac0a74c84218685193184e7b18963e5ff2b14ac42146d8b70282e7d6e23110f",
+        "inputSha256": "f91b70ae073de6d616bebda58cf336ddc2c7d91eebd043d4a7d01ab88a52c775",
+        "originalAlgorithmSha256": "44e341a40a6294fde1dc0fdeb0833d1e4e3a66223356ea162994681bec5a8c0e"
+      }
+    }
+  },
+  "CH4": {
+    "target": {
+      "id": "1901223b388c86f51dee79a3e02ee21982647cf5167bb434b3f11476f2de32cb",
+      "activationId": 17,
+      "original": {
+        "passageKey": "9277fbc32b01c32c219fde17756dfa8fced115044b4cbb1422c2e316eeda37ef",
+        "payloadHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "receivedAt": "2026-10-21T12:00:01+00:00",
+        "measurement": {
+          "algorithmVersion": "test-algorithm",
+          "baselineCandidateSha256": null,
+          "baselineVersionId": null,
+          "boundSpread": null,
+          "calibrationId": "cal-4",
+          "channelId": "CH4",
+          "configurationHash": "f44a849a139e5b861baf40e5954d3dc4a45b9b1e4be8b2324d70e0d9a2ed2b50",
+          "filledRatio": 0.0,
+          "frameDegraded": false,
+          "holeRatio": 0.0,
+          "measuredAt": "2026-10-21T12:00:00.200000Z",
+          "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+          "measurementId": "original-CH4",
+          "measurementStartedAt": "2026-10-21T12:00:00Z",
+          "nodeId": "test-node",
+          "passageId": "passage-CH4",
+          "pointCount": 2400,
+          "points": [
+            [
+              -1.149999976158142,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -1.0499999523162842,
+              -4.949999809265137,
+              -3.4000000953674316
+            ],
+            [
+              -0.949999988079071,
+              -4.949999809265137,
+              -3.4000000953674316
+            ]
+          ],
+          "reason": "解析载重平面夹具",
+          "sourceMode": "live",
+          "verdict": "loaded",
+          "volumeM3": null,
+          "volumeStatus": "unavailable"
+        },
+        "binding": {
+          "passageKey": "9277fbc32b01c32c219fde17756dfa8fced115044b4cbb1422c2e316eeda37ef",
+          "licensePlate": "宁A05922F",
+          "workflowId": "workflow-CH4",
+          "cameraIdentifier": "CAM_004",
+          "vehicleIdentity": "plate:宁A05922F",
+          "actor": "fixture",
+          "reason": "解析夹具",
+          "boundAt": "2026-10-21T13:00:00+00:00"
+        }
+      },
+      "baseline": {
+        "versionId": "afternoon-ch4",
+        "channelId": "CH4",
+        "licensePlate": "宁A05922F",
+        "nodeId": "test-node",
+        "scopeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "calibrationId": "cal-4",
+        "vehicleIdentity": "plate:宁A05922F",
+        "measurementId": "empty-ch4",
+        "actor": "fixture",
+        "reason": "解析CH4空车",
+        "createdAt": "2026-10-21T13:00:00+00:00",
+        "activatedAt": "2026-10-21T13:00:00+00:00",
+        "active": true,
+        "assetSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366"
+      },
+      "baselineSource": {
+        "measurementId": "empty-ch4",
+        "nodeId": "test-node",
+        "passageId": "empty-passage",
+        "algorithmVersion": "test-algorithm",
+        "pointCount": 2400,
+        "points": [],
+        "channelId": "CH4",
+        "calibrationId": "cal-4",
+        "configurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sourceMode": "live",
+        "verdict": "empty",
+        "frameDegraded": false,
+        "baselineCandidateSha256": "c2bf6ac9f1142fb6ef03212e7144da0b5670cf0a328224efbaf377fa2aad1366",
+        "measuredAt": "2026-10-21T13:00:00+00:00"
+      }
+    },
+    "request": {
+      "activationId": 17,
+      "baselineVersionId": "afternoon-ch4",
+      "id": "1901223b388c86f51dee79a3e02ee21982647cf5167bb434b3f11476f2de32cb",
+      "measurement": {
+        "algorithmVersion": "test-algorithm",
+        "baselineCandidateSha256": null,
+        "baselineUse": {
+          "dxM": 0.0,
+          "dyM": 0.0,
+          "policy": "ch4-shared-v1",
+          "pose": null,
+          "registrationReason": "找不到车厢后沿；（横向未对齐：车厢中段侧壁点不足）；（偏航未对齐：左右位置没对上，不单独补偏航）；（姿态未对齐：车厢中段侧壁点不足）",
+          "registrationStatus": "baseline_fallback",
+          "sourceCalibrationId": "cal-4",
+          "sourceChannelId": "CH4",
+          "sourceConfigurationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "yawPivotYM": 0.0,
+          "yawSlope": 0.0
+        },
+        "baselineVersionId": "afternoon-ch4",
+        "boundSpread": null,
+        "calibrationId": "cal-4",
+        "channelId": "CH4",
+        "configurationHash": "f44a849a139e5b861baf40e5954d3dc4a45b9b1e4be8b2324d70e0d9a2ed2b50",
+        "filledRatio": 0.0,
+        "frameDegraded": false,
+        "holeRatio": 0.0,
+        "measuredAt": "2026-10-21T12:00:00.200000Z",
+        "measurementEndedAt": "2026-10-21T12:00:00.200000Z",
+        "measurementId": "original-CH4",
+        "measurementStartedAt": "2026-10-21T12:00:00Z",
+        "nodeId": "test-node",
+        "passageId": "passage-CH4",
+        "pointCount": 2400,
+        "points": [
+          [
+            -1.149999976158142,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -1.0499999523162842,
+            -4.949999809265137,
+            -3.4000000953674316
+          ],
+          [
+            -0.949999988079071,
+            -4.949999809265137,
+            -3.4000000953674316
+          ]
+        ],
+        "reason": "解析载重平面夹具",
+        "sourceMode": "live",
+        "verdict": "loaded",
+        "volumeM3": 9.10799620294589,
+        "volumeStatus": "success"
+      },
+      "measurementId": "original-CH4",
+      "provenance": {
+        "calculationAlgorithmSha256": "8919fa57090697976490ab92a0411cc98b0a26aaee421657423ffb0299c26543",
+        "exitFramesSha256": "2ac0a74c84218685193184e7b18963e5ff2b14ac42146d8b70282e7d6e23110f",
+        "inputSha256": "4fae5a37d8a9a6617c36d237c2b2e96970801b54f7066f94644fa6f6714a54d9",
+        "originalAlgorithmSha256": "44e341a40a6294fde1dc0fdeb0833d1e4e3a66223356ea162994681bec5a8c0e"
+      }
+    }
+  },
+  "assetBase64": "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"
+}

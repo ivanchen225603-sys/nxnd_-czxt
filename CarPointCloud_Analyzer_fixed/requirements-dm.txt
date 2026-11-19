@@ -1,0 +1,4 @@
+# Optional direct-write database dependency, verified on CPython 3.11 Windows x64.
+# Install in the project environment; do not upgrade unrelated global packages.
+-r requirements.txt
+dmPython==2.5.38

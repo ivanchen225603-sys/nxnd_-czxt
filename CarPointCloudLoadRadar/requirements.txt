@@ -1,0 +1,16 @@
+# 载重雷达检测系统 —— 运行依赖
+#
+# 设计原则：**只依赖 numpy**。
+#   · 目标平台是麒麟 OS（x86_64 / ARM64 / LoongArch），商业项目不宜引入重依赖；
+#   · Web 看板、HTTP 服务、SSE、点云导出全部用标准库自己实现（http.server /
+#     socket / json / struct），所以没有 Flask / tornado / three.js 之类的东西；
+#   · 看板前端是零依赖的 Canvas2D，不引 CDN —— 现场常常没有外网。
+#
+# 安装（麒麟 / 统信 / Ubuntu / CentOS 都一样）：
+#     python3 -m pip install -r requirements.txt
+# 或直接：
+#     python3 -m pip install numpy
+#
+# 版本要求：>= 1.22（用到 numpy.percentile 的现代签名与 float32 行为）
+# 已测：1.26.3（Python 3.11）、2.5.3（Python 3.13）
+numpy>=1.22

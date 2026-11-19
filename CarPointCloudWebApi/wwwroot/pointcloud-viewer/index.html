@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>空车档案 - 车载雷达点云系统</title>
+    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
+    <link rel="stylesheet" href="css/archive-workbench.css?v=20261012-1">
+    <link rel="stylesheet" href="css/page-shell.css?v=20261029-1">
+</head>
+<body class="archive-page" oncontextmenu="return false;">
+    <!-- 全局顶部导航 -->
+    <nav id="global-nav" class="global-nav" aria-label="主导航">
+        <a class="nav-brand" href="live.html">
+            <img class="ui-icon" src="vendor/tabler-icons/radar-2.svg" alt="" aria-hidden="true">
+            <span class="nav-title">
+                车载雷达点云系统
+                <span class="brand-caption">
+                    车辆测量工作台
+                </span>
+            </span>
+        </a>
+        <div class="nav-account">
+            <span id="navRole">
+                当前用户
+            </span>
+            <span id="navUser">
+            </span>
+            <a href="#" id="navLogout" title="退出登录">
+                退出
+            </a>
+        </div>
+        <div class="nav-links">
+            <span class="nav-group">
+                现场作业
+            </span>
+            <a href="live.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/antenna.svg" alt="" aria-hidden="true">
+                空车尺寸测量
+            </a>
+            <a href="load-radar.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/cube.svg" alt="" aria-hidden="true">
+                载货体积
+            </a>
+            <a href="index.html" class="nav-link active" aria-current="page">
+                <img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">
+                空车档案
+            </a>
+            <span class="nav-group management">
+                管理
+            </span>
+            <a href="volume-query.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                体积查询
+            </a>
+            <a href="logs.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true">
+                日志
+            </a>
+            <a href="users.html" class="nav-link" data-role="admin">
+                <img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">
+                用户管理
+            </a>
+        </div>
+    </nav>
+
+    <main id="main-layout">
+        <header id="top-toolbar">
+            <h1>空车档案</h1>
+            <p class="archive-description">查询已保存的空车点云与尺寸数据，用于历史记录查看与复核。</p>
+            <div class="toolbar-buttons">
+                <label class="plate-search-label" for="plateInput">车辆车牌号</label>
+                <input id="plateInput" class="plate-search-input" type="text"
+                       maxlength="32" autocomplete="off" placeholder="例如：宁A10333F">
+                <button id="searchPlateBtn" class="toolbar-btn">
+                    <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                    查询空车云图
+                </button>
+                <div class="btn-row">
+                    <button id="resetBtn" class="toolbar-btn secondary" disabled>
+                        <img class="ui-icon" src="vendor/tabler-icons/refresh.svg" alt="" aria-hidden="true">
+                        重置视角
+                    </button>
+                    <button id="screenshotBtn" class="toolbar-btn secondary" disabled>
+                        <img class="ui-icon" src="vendor/tabler-icons/camera.svg" alt="" aria-hidden="true">
+                        截图
+                    </button>
+                </div>
+            </div>
+            <span id="loadingIndicator" class="loading" role="status" style="display: none;">正在加载...</span>
+        </header>
+
+        <div class="archive-workspace">
+            <section id="right-content" aria-label="已保存的空车云图">
+                <div id="canvas-wrapper" data-state="empty" oncontextmenu="return false;">
+                    <div id="canvas-container"></div>
+                    <div class="archive-canvas-heading">
+                        <h2 id="archiveCloudLabel">空车云图 · 尚未查询</h2>
+                        <span>拖拽旋转 · 滚轮缩放</span>
+                    </div>
+                    <div id="archiveCanvasNotice" class="archive-canvas-notice" role="status">
+                        <img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">
+                        <strong id="archiveNoticeTitle">输入车牌，查看空车档案</strong>
+                        <span id="archiveNoticeMessage">查询该车辆最新保存的云图与尺寸，档案数据非实时。</span>
+                    </div>
+                </div>
+                <div id="status-bar">
+                    <span id="statusPoints">点数: 0</span>
+                    <span id="statusFPS">FPS: 0</span>
+                    <span id="statusDistance">距离: 0.00m</span>
+                    <span id="statusMessage" role="status">就绪</span>
+                </div>
+            </section>
+
+            <aside id="left-sidebar" aria-label="车辆信息与点云控制">
+                <section class="archive-vehicle">
+                    <h2>车辆信息</h2>
+                    <p id="archiveProfileEmpty" class="archive-muted">查询后显示车辆尺寸及扫描时间。</p>
+                    <div id="empty-vehicle-panel" style="display: none;" aria-live="polite">
+                        <dl class="empty-profile-meta">
+                            <dt>车牌号</dt><dd><strong id="profile-plate">--</strong></dd>
+                            <dt>扫描时间</dt><dd id="profile-time">--</dd>
+                            <dt>数据状态</dt><dd>已保存云图 · 非实时</dd>
+                            <dt>数据质量</dt><dd><span id="profile-quality">--</span></dd>
+                        </dl>
+                        <p class="archive-missing-note">缺测项以 -- 显示</p>
+                        <h3>空车尺寸（cm）</h3>
+                        <div class="dimension-grid">
+                            <div class="dimension-item"><span>车厢长度</span><strong id="dimension-length">--</strong></div>
+                            <div class="dimension-item"><span>车厢宽度</span><strong id="dimension-width">--</strong></div>
+                            <div class="dimension-item"><span>厢体高度</span><strong id="dimension-height">--</strong></div>
+                            <div class="dimension-item"><span>厢底离地</span><strong id="dimension-bottom">--</strong></div>
+                            <div class="dimension-item"><span>车头至厢前</span><strong id="dimension-cab">--</strong></div>
+                            <div class="dimension-item"><span>高低板差</span><strong id="dimension-high-low">--</strong></div>
+                        </div>
+                    </div>
+                </section>
+
+                <details id="control-panel">
+                    <summary>点云显示设置</summary>
+                    <div class="control-group point-size-group">
+                        <label for="pointSize">点大小: <span id="pointSizeValue">0.5</span></label>
+                        <input type="range" id="pointSize" min="0.01" max="1" step="0.01" value="0.5">
+                    </div>
+                    <div class="control-group">
+                        <label for="colorMode">着色模式</label>
+                        <select id="colorMode">
+                            <option value="uniform">统一颜色</option>
+                            <option value="height">高度着色</option>
+                            <option value="intensity">强度着色</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="viewOrientation">视角方向</label>
+                        <select id="viewOrientation">
+                            <option value="auto">自动适配</option>
+                            <option value="landscape">横向显示</option>
+                            <option value="portrait">纵向显示</option>
+                        </select>
+                    </div>
+                    <div class="control-group axes-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="showAxes" checked>
+                            <span>显示坐标轴</span>
+                        </label>
+                    </div>
+                </details>
+
+                <details id="bbox-panel" style="display: none;">
+                    <summary>点云边界（m）</summary>
+                    <div id="bbox-content">
+                        <div class="bbox-item"><span class="label">X 范围</span><span class="value" id="bbox-x">--</span></div>
+                        <div class="bbox-item"><span class="label">Y 范围</span><span class="value" id="bbox-y">--</span></div>
+                        <div class="bbox-item"><span class="label">Z 范围</span><span class="value" id="bbox-z">--</span></div>
+                        <div class="bbox-item"><span class="label">中心点</span><span class="value" id="bbox-center">--</span></div>
+                    </div>
+                </details>
+                <details class="archive-point-info">
+                    <summary>点云信息</summary>
+                    <div id="pointInfo">未加载数据</div>
+                </details>
+            </aside>
+        </div>
+    </main>
+
+    <!-- Three.js 库 (CDN) -->
+    <!-- 内网离线部署：依赖随包发布，核心库必须先于 OrbitControls 加载。 -->
+    <script src="vendor/three-r128/three.min.js"></script>
+    <script src="vendor/three-r128/OrbitControls.js"></script>
+
+    <!-- 自定义脚本 -->
+    <script src="js/api-config.js?v=1"></script>
+    <script src="js/auth-guard.js"></script>
+    <script src="js/api-client.js?v=3"></script>
+    <script src="js/nav.js?v=20261012-1"></script>
+    <script src="js/utils.js?v=7"></script>
+    <script src="js/pcd-parser.js?v=7"></script>
+    <script src="js/viewer.js?v=20261012-1"></script>
+    <script src="js/controls.js?v=7"></script>
+    <script src="js/main.js?v=20261012-1"></script>
+</body>
+</html>

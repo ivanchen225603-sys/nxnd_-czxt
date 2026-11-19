@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>空车尺寸测量</title>
+    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261105-1">
+    <link rel="stylesheet" href="css/page-shell.css?v=20261029-1">
+</head>
+<body class="live-page">
+    <nav id="global-nav" class="global-nav" aria-label="主导航">
+        <a class="nav-brand" href="live.html">
+            <img class="ui-icon" src="vendor/tabler-icons/radar-2.svg" alt="" aria-hidden="true">
+            <span class="nav-title">
+                车载雷达点云系统
+                <span class="brand-caption">
+                    车辆测量工作台
+                </span>
+            </span>
+        </a>
+        <div class="nav-account">
+            <span id="navRole">
+                当前用户
+            </span>
+            <span id="navUser">
+            </span>
+            <a href="#" id="navLogout" title="退出登录">
+                退出
+            </a>
+        </div>
+        <div class="nav-links">
+            <span class="nav-group">
+                现场作业
+            </span>
+            <a href="live.html" class="nav-link active" aria-current="page">
+                <img class="ui-icon" src="vendor/tabler-icons/antenna.svg" alt="" aria-hidden="true">
+                空车尺寸测量
+            </a>
+            <a href="load-radar.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/cube.svg" alt="" aria-hidden="true">
+                载货体积
+            </a>
+            <a href="index.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">
+                空车档案
+            </a>
+            <span class="nav-group management">
+                管理
+            </span>
+            <a href="volume-query.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                体积查询
+            </a>
+            <a href="logs.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true">
+                日志
+            </a>
+            <a href="users.html" class="nav-link" data-role="admin">
+                <img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">
+                用户管理
+            </a>
+        </div>
+    </nav>
+
+    <main class="workspace">
+        <header class="page-heading">
+            <div><h1>空车尺寸测量</h1></div>
+            <a href="index.html"><img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">查询空车档案</a>
+        </header>
+        <section class="capture-toolbar" aria-label="本次车辆采集">
+            <div class="capture-field"><label for="plateInput">车牌号</label><input id="plateInput" class="live-input" type="text" maxlength="32" autocomplete="off" placeholder="请输入本次车辆车牌"></div>
+            <button id="btnCapture" class="live-btn primary" type="button">开始采集并计算</button>
+            <div id="captureHint" class="banner" role="status" aria-live="polite"></div>
+        </section>
+        <div id="previewBanner" class="banner" role="status" aria-live="polite"></div>
+        <section class="preview-surface" aria-labelledby="previewTitle">
+            <header class="preview-toolbar">
+                <div><h2 id="previewTitle">实时预览 · 仅供监看</h2><p>原始 A（CAM_004） / 原始 B（CAM_005）</p></div>
+                <div class="preview-actions">
+                    <button id="btnStartWatch" class="live-btn secondary" type="button">开始实时监看</button>
+                    <button id="btnStopWatch" class="live-btn secondary" type="button">暂停预览</button>
+                    <button class="live-btn secondary" type="button" data-view="top">俯视</button>
+                    <button class="live-btn secondary" type="button" data-view="side">侧视</button>
+                    <button class="live-btn secondary" type="button" data-view="front">正视</button>
+                    <button class="live-btn secondary" type="button" data-view="reset">重置</button>
+                </div>
+            </header>
+            <div class="live-canvas-wrap">
+                <canvas id="liveCanvas" aria-label="双雷达点云预览"></canvas>
+                <div class="canvas-hint">拖动旋转 · 滚轮缩放 · 右键平移</div>
+                <div id="canvasOverlay" class="canvas-overlay" role="status">等待有效新帧…</div>
+            </div>
+            <div class="preview-options">
+                <label><input id="showCompletion" type="checkbox">补点参考（只读，不入库）</label>
+                <label for="pointSize">点大小 <input id="pointSize" type="range" min="1" max="6" step="1" value="2"></label>
+                <p id="completionStatus">原始双雷达叠加，不显示合成点</p>
+            </div>
+        </section>
+        <details class="preview-diagnostics">
+            <summary>雷达连接与画面详情</summary>
+            <div class="diagnostics-grid">
+                <section><h3 id="cameraATitle" class="swatch-a">CAM_004（基准 A）</h3><div id="cameraAStatus"></div></section>
+                <section><h3 id="cameraBTitle" class="swatch-b">CAM_005（B → A）</h3><div id="cameraBStatus"></div></section>
+                <section><h3>双雷达画面</h3><div id="pairStatus"></div></section>
+            </div>
+        </details>
+        <section class="result-summary" aria-labelledby="summaryTitle">
+            <header class="result-summary-heading">
+                <div><h2 id="summaryTitle">采集结果 · 非实时</h2><p>仅显示当前页面发起或按流程编号查询的结果</p></div>
+                <button id="btnReopenProgress" class="live-btn secondary" type="button" style="display:none">查看本次流程进度</button>
+            </header>
+            <div id="resultSummary" class="summary-content" aria-live="polite"><p class="summary-empty">尚未执行采集。预览画面不会产生尺寸记录。</p></div>
+        </section>
+    </main>
+
+    <!--
+        采集流程模态框。进度与结果都在这里呈现：
+        采集会写业务数据，过程和结论不该和实时预览的状态挤在同一个侧栏里。
+    -->
+    <div id="captureModal" class="modal-mask" style="display:none">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="captureModalTitle">
+            <div class="modal-head">
+                <h2 id="captureModalTitle">本次采集与计算</h2>
+                <div id="captureModalMeta" class="modal-meta"></div>
+                <button id="btnCloseModal" class="modal-close" type="button" aria-label="关闭">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="captureBanner" class="banner"></div>
+
+                <!--
+                    仅在服务端明确表示"无法核实上一次是否已采集"时展开。
+                    这一步是让人替系统做它证明不了的判断，因此必须由操作员显式点击。
+                -->
+                <div id="confirmAction" style="display:none">
+                    <div class="banner warn" style="display:block">
+                        系统无法确定上一次是否已经采集（雷达服务可能重启过）。
+                        请先到磅房核实本车是否已经扫描：<b>若已采集，直接按流程编号查询结果，不要重发</b>；
+                        确认未采集后再点击下方按钮。
+                    </div>
+                    <button id="btnConfirmRedispatch" class="live-btn danger">已核实未采集，重新发起</button>
+                </div>
+
+                <h3>任务进度</h3>
+                <div id="progressSteps"></div>
+
+                <h3>计算结果</h3>
+                <div id="resultArea" class="result-empty">尚未执行采集。</div>
+            </div>
+            <div class="modal-foot">
+                <button id="btnRefreshResult" class="live-btn secondary" disabled>刷新本次结果（不重新采集）</button>
+                <button id="btnCancelCapture" class="live-btn danger" disabled>取消本次采集</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api-config.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/auth-guard.js"></script>
+    <script src="js/nav.js?v=20261012-1"></script>
+    <script src="js/point-cloud-gl.js?v=20261102-1"></script>
+    <script src="js/pcd-parser.js"></script>
+    <script src="js/radar-live.js?v=20261106-result"></script>
+</body>
+</html>

@@ -1,0 +1,303 @@
+/* Account maintenance follows the selected full-width management workbench. */
+.users-page .users-container {
+    min-width: 0;
+    padding: 24px;
+    gap: 20px;
+    animation: none;
+}
+
+.users-page .users-header {
+    display: block;
+}
+
+.users-page .users-header h1 {
+    margin: 0;
+    gap: 12px;
+    font-size: 26px;
+    line-height: 1.35;
+}
+
+.users-page .users-header p {
+    margin: 8px 0 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.users-page .user-toolbar {
+    width: 100%;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.users-page .user-search {
+    position: relative;
+    width: 420px;
+    max-width: 100%;
+}
+
+.users-page .user-search > .ui-icon {
+    position: absolute;
+    top: 13px;
+    left: 14px;
+    width: 18px;
+    height: 18px;
+    pointer-events: none;
+}
+
+.users-page .user-toolbar input {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding-left: 42px;
+    font-size: 14px;
+}
+
+.users-page #addUserBtn {
+    min-height: 46px;
+    min-width: 148px;
+    gap: 8px;
+}
+
+.users-page .users-table-wrapper {
+    min-width: 0;
+    min-height: 420px;
+    flex: none;
+    overflow: hidden;
+    border-radius: 8px;
+}
+
+.users-page .users-table-scroll {
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.users-page .users-table {
+    min-width: 980px;
+    font-size: 14px;
+}
+
+.users-page .users-table th,
+.users-page .users-table td {
+    padding: 17px 20px;
+    line-height: 1.5;
+    vertical-align: middle;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.users-page .users-table th {
+    height: 56px;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.users-page .users-table td {
+    height: 66px;
+}
+
+.users-page .users-table tbody tr:last-child td {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.users-page .users-table td strong {
+    font-weight: 500;
+}
+
+.users-page .users-table .user-last-login {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.users-page .role-badge,
+.users-page .status-badge {
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
+    white-space: nowrap;
+}
+
+.users-page .role-badge::before,
+.users-page .status-badge::before {
+    display: none;
+}
+
+.users-page .role-badge.admin {
+    background: #eaf2ff;
+    color: #1d4ed8;
+}
+
+.users-page .role-badge.viewer {
+    background: #eef1f5;
+    color: #536580;
+}
+
+.users-page .status-badge.on {
+    background: #e5f6ee;
+    color: #047857;
+}
+
+.users-page .status-badge.off {
+    background: #fff0f0;
+    color: #b91c1c;
+}
+
+.users-page .row-actions {
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+    white-space: nowrap;
+}
+
+.users-page .row-actions button {
+    min-width: 44px;
+    min-height: 36px;
+    width: auto;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent-primary);
+    font-size: 14px;
+    box-shadow: none;
+}
+
+.users-page .row-actions button + button {
+    margin-left: 4px;
+}
+
+.users-page .row-actions button:hover {
+    background: #eef4ff;
+}
+
+.users-page .row-actions button.danger {
+    color: var(--accent-danger);
+}
+
+.users-page .row-actions button.danger:hover {
+    background: #fff0f0;
+}
+
+.users-page .users-pagination {
+    margin-top: auto;
+    padding: 18px 20px;
+    border: 0;
+    border-radius: 0;
+}
+
+.users-page .users-pagination-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.users-page .page-info,
+.users-page .users-page-size {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.users-page .page-btns .page-btn {
+    min-width: 36px;
+    height: 36px;
+    background: #fff;
+}
+
+.users-page .page-btns .page-btn.active {
+    background: var(--accent-primary);
+}
+
+.users-page .users-empty {
+    padding: 72px 20px;
+    font-size: 14px;
+}
+
+.users-page .users-empty .ui-icon {
+    width: 36px;
+    height: 36px;
+    opacity: .6;
+}
+
+.users-page .modal-overlay {
+    backdrop-filter: none;
+}
+
+.users-page .modal {
+    border-radius: 8px;
+}
+
+.users-page .form-group label,
+.users-page .form-group input,
+.users-page .form-group select {
+    font-size: 14px;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.users-page .hint,
+.users-page .error-text {
+    font-size: 13px;
+}
+
+@media (max-width: 800px) {
+    .users-page .users-container {
+        padding: 20px 16px;
+        gap: 16px;
+    }
+
+    .users-page .user-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .users-page .user-search {
+        width: 100%;
+    }
+
+    .users-page .users-table th:nth-child(2),
+    .users-page .users-table td:nth-child(2) {
+        display: table-cell;
+    }
+
+    .users-page .row-actions button,
+    .users-page .page-btns .page-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .users-page .users-pagination {
+        align-items: flex-start;
+        padding: 16px;
+    }
+
+    .users-page .users-pagination-actions {
+        width: 100%;
+        gap: 12px;
+    }
+
+    .users-page .page-btns {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .users-page .modal-overlay {
+        padding: 12px;
+    }
+
+    .users-page .modal {
+        padding: 24px 20px;
+        max-height: calc(100dvh - 24px);
+    }
+
+    .users-page .form-group input,
+    .users-page .form-group select,
+    .users-page .modal-actions button {
+        min-height: 44px;
+    }
+}

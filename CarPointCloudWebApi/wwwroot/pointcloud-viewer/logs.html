@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统日志 - 车载雷达点云系统</title>
+    <link rel="stylesheet" href="css/style.css?v=8">
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
+    <link rel="stylesheet" href="css/logs-workbench.css?v=20261021-1">
+</head>
+<body class="logs-page">
+    <!-- 全局顶部导航 -->
+    <nav id="global-nav" class="global-nav" aria-label="主导航">
+        <a class="nav-brand" href="live.html">
+            <img class="ui-icon" src="vendor/tabler-icons/radar-2.svg" alt="" aria-hidden="true">
+            <span class="nav-title">
+                车载雷达点云系统
+                <span class="brand-caption">
+                    车辆测量工作台
+                </span>
+            </span>
+        </a>
+        <div class="nav-account">
+            <span id="navRole">
+                当前用户
+            </span>
+            <span id="navUser">
+            </span>
+            <a href="#" id="navLogout" title="退出登录">
+                退出
+            </a>
+        </div>
+        <div class="nav-links">
+            <span class="nav-group">
+                现场作业
+            </span>
+            <a href="live.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/antenna.svg" alt="" aria-hidden="true">
+                空车尺寸测量
+            </a>
+            <a href="load-radar.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/cube.svg" alt="" aria-hidden="true">
+                载货体积
+            </a>
+            <a href="index.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">
+                空车档案
+            </a>
+            <span class="nav-group management">
+                管理
+            </span>
+            <a href="volume-query.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                体积查询
+            </a>
+            <a href="logs.html" class="nav-link active" aria-current="page">
+                <img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true">
+                日志
+            </a>
+            <a href="users.html" class="nav-link" data-role="admin">
+                <img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">
+                用户管理
+            </a>
+        </div>
+    </nav>
+
+    <!-- 主布局容器 -->
+    <div id="main-layout">
+        <main class="logs-container">
+            <!-- 页面头部 -->
+            <header class="logs-header">
+                <h1>
+                    <span class="header-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true"></span>
+                    系统日志
+                </h1>
+                <p>查询系统接口调用日志，用于定位问题与追溯请求链路。</p>
+            </header>
+
+            <!-- 筛选面板 -->
+            <section class="logs-filter-panel" aria-label="日志筛选">
+                <div class="filter-primary">
+                    <div class="filter-group">
+                        <label for="licensePlateInput">
+                            车牌号
+                        </label>
+                        <input type="text" id="licensePlateInput" placeholder="车牌号" autocomplete="off">
+                    </div>
+                    <div class="filter-group">
+                        <label for="startTimeInput">
+                            开始时间
+                        </label>
+                        <input type="datetime-local" id="startTimeInput">
+                    </div>
+                    <div class="filter-group">
+                        <label for="endTimeInput">
+                            结束时间
+                        </label>
+                        <input type="datetime-local" id="endTimeInput">
+                    </div>
+                    <div class="filter-group">
+                        <label for="levelSelect">
+                            日志级别
+                        </label>
+                        <select id="levelSelect">
+                            <option value="">
+                                全部级别
+                            </option>
+                            <option value="debug">
+                                Debug
+                            </option>
+                            <option value="info">
+                                Info
+                            </option>
+                            <option value="warn">
+                                Warning
+                            </option>
+                            <option value="error">
+                                Error
+                            </option>
+                        </select>
+                    </div>
+                    <div class="filter-group filter-actions">
+                        <button id="searchBtn" class="filter-btn primary">
+                            <span aria-hidden="true">
+                                <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                            </span>
+                            查询
+                        </button>
+                        <button id="resetBtn" class="filter-btn secondary">
+                            <span aria-hidden="true">
+                                <img class="ui-icon" src="vendor/tabler-icons/refresh.svg" alt="" aria-hidden="true">
+                            </span>
+                            重置
+                        </button>
+                        <button id="refreshBtn" class="filter-btn secondary">
+                            <span aria-hidden="true">
+                                <img class="ui-icon" src="vendor/tabler-icons/refresh.svg" alt="" aria-hidden="true">
+                            </span>
+                            刷新
+                        </button>
+                    </div>
+                </div>
+                <details class="filter-advanced">
+                    <summary>
+                        高级筛选：关键字、交互 ID、流程 ID、第三方接口、日志来源
+                    </summary>
+                    <div class="filter-advanced-grid">
+                        <div class="filter-group full-width">
+                            <label for="keywordInput">
+                                关键字搜索
+                            </label>
+                            <input type="text" id="keywordInput" placeholder="搜索日志内容、来源或关键字..." autocomplete="off">
+                        </div>
+                        <div class="filter-group full-width">
+                            <label for="interactionIdInput">交互 ID</label>
+                            <input type="text" id="interactionIdInput" placeholder="输入完整交互 ID" autocomplete="off">
+                        </div>
+                        <div class="filter-group">
+                            <label for="workflowIdInput">
+                                流程 ID
+                            </label>
+                            <input type="text" id="workflowIdInput" placeholder="workflowId" autocomplete="off">
+                        </div>
+                        <div class="filter-group">
+                            <label for="integrationTypeSelect">
+                                第三方接口
+                            </label>
+                            <select id="integrationTypeSelect">
+                                <option value="">
+                                    全部接口
+                                </option>
+                                <option value="LicensePlate">
+                                    获取车牌号
+                                </option>
+                                <option value="VehicleDimensions">
+                                    获取车辆尺寸
+                                </option>
+                                <option value="CoalVolume">
+                                    获取煤炭体积
+                                </option>
+                                <option value="VehicleArrival">
+                                    来车通知
+                                </option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="sourceSelect">
+                                日志来源
+                            </label>
+                            <select id="sourceSelect">
+                                <option value="">
+                                    全部来源
+                                </option>
+                            </select>
+                        </div>
+                    </div>
+                </details>
+            </section>
+
+            <!-- 日志表格 -->
+            <section id="logsResults" class="logs-table-wrapper" aria-label="日志查询结果" aria-busy="false">
+                <div class="logs-table-header">
+                    <h2>日志列表</h2>
+                    <div class="logs-result-tools">
+                        <span class="logs-result-count">本次查询 <strong id="statFiltered">—</strong> 条</span>
+                        <span class="logs-count-context">本次读取 <span id="statTotal">—</span> 条</span>
+                        <select id="pageSizeSelect" class="page-size-select" aria-label="每页条数">
+                            <option value="10">10 条/页</option>
+                            <option value="20" selected>20 条/页</option>
+                            <option value="50">50 条/页</option>
+                            <option value="100">100 条/页</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="logs-table-scroll" tabindex="0" role="region" aria-label="日志列表，可横向滚动">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th scope="col" class="logs-col-time">时间</th>
+                                <th scope="col" class="logs-col-level">级别</th>
+                                <th scope="col" class="logs-col-source">接口 / 方向</th>
+                                <th scope="col" class="logs-col-id">交互 ID</th>
+                                <th scope="col" class="logs-col-status">HTTP 状态</th>
+                                <th scope="col">消息内容</th>
+                                <th scope="col" class="logs-col-action">完整链路</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody">
+                            <!-- 动态生成 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="logsEmpty" class="logs-empty" role="status" style="display: none;">
+                    <span class="logs-empty-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true"></span>
+                    <span class="logs-empty-text">暂无符合条件的日志</span>
+                </div>
+
+                <!-- 分页 -->
+                <nav class="logs-pagination" aria-label="分页导航">
+                    <div class="pagination-info" id="paginationInfo">
+                        正在查询日志…
+                    </div>
+                    <div class="pagination-controls" id="paginationControls">
+                        <!-- 动态生成 -->
+                    </div>
+                </nav>
+            </section>
+        </main>
+    </div>
+
+    <div id="interactionModal" class="interaction-modal" hidden>
+        <div class="interaction-dialog" role="dialog" aria-modal="true" aria-labelledby="interactionModalTitle">
+            <div class="interaction-dialog-header">
+                <div>
+                    <h2 id="interactionModalTitle">第三方交互完整链路</h2>
+                    <div id="interactionModalSubtitle" class="interaction-modal-subtitle"></div>
+                </div>
+                <button id="interactionModalClose" class="interaction-modal-close" type="button" aria-label="关闭">×</button>
+            </div>
+            <div id="interactionModalBody" class="interaction-dialog-body" tabindex="0">
+                正在加载链路日志…
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义脚本 -->
+    <script src="js/api-config.js?v=1"></script>
+    <script src="js/auth-guard.js"></script>
+    <script src="js/api-client.js?v=2"></script>
+    <script src="js/nav.js?v=20261012-1"></script>
+    <script src="js/logs.js?v=20261021-1"></script>
+</body>
+</html>

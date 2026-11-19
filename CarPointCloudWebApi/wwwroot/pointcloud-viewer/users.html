@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - 车载雷达点云系统</title>
+    <link rel="stylesheet" href="css/style.css?v=9">
+    <style>
+        /* ============================================
+           用户管理页面专属样式
+           ============================================ */
+
+        .users-page {
+            overflow: auto;
+        }
+
+        .users-page #main-layout {
+            height: calc(100vh - var(--nav-height));
+            margin-top: var(--nav-height);
+            flex-direction: column;
+            padding: 24px;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        .users-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        /* 页面头部 */
+        .users-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .users-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .users-header h1 .header-icon {
+            font-size: 24px;
+        }
+
+        /* 工具栏 */
+        .user-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .user-toolbar input {
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            min-width: 240px;
+            transition: var(--transition);
+        }
+
+        .user-toolbar input::placeholder {
+            color: rgba(148, 163, 184, 0.5);
+        }
+
+        .user-toolbar input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .primary-btn {
+            padding: 10px 18px;
+            border: none;
+            border-radius: var(--radius-md);
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .primary-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+            filter: brightness(1.1);
+        }
+
+        .primary-btn:active {
+            transform: translateY(0);
+        }
+
+        /* 表格区域 */
+        .users-table-wrapper {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 400px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .users-table th,
+        .users-table td {
+            padding: 13px 18px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .users-table th {
+            background: rgba(11, 17, 32, 0.6);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .users-table tbody tr {
+            transition: var(--transition);
+        }
+
+        .users-table tbody tr:hover {
+            background: rgba(59, 130, 246, 0.08);
+        }
+
+        .users-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .users-table td {
+            color: var(--text-primary);
+        }
+
+        .users-table td strong {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* 徽章 */
+        .role-badge,
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            gap: 5px;
+        }
+
+        .role-badge::before,
+        .status-badge::before {
+            content: '';
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+        }
+
+        .role-badge.admin {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-danger);
+        }
+
+        .role-badge.admin::before {
+            background: var(--accent-danger);
+        }
+
+        .role-badge.viewer {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-primary);
+        }
+
+        .role-badge.viewer::before {
+            background: var(--accent-primary);
+        }
+
+        .status-badge.on {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-success);
+        }
+
+        .status-badge.on::before {
+            background: var(--accent-success);
+            box-shadow: 0 0 6px var(--accent-success);
+        }
+
+        .status-badge.off {
+            background: rgba(148, 163, 184, 0.15);
+            color: var(--text-secondary);
+        }
+
+        .status-badge.off::before {
+            background: var(--text-secondary);
+        }
+
+        /* 行操作按钮 */
+        .row-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .row-actions button {
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .row-actions button:hover {
+            border-color: var(--accent-primary);
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-primary);
+        }
+
+        .row-actions button.danger {
+            color: var(--text-primary);
+        }
+
+        .row-actions button.danger:hover {
+            border-color: var(--accent-danger);
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-danger);
+        }
+
+        /* 空状态 */
+        .users-empty {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+            gap: 12px;
+            font-size: 14px;
+        }
+
+        /* 弹窗 */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1001;
+            backdrop-filter: blur(6px);
+            padding: 20px;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal {
+            width: 100%;
+            max-width: 460px;
+            max-height: 90vh;
+            overflow-y: auto;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            box-shadow: var(--shadow-lg);
+            transform: translateY(20px) scale(0.98);
+            transition: transform 0.25s ease;
+        }
+
+        .modal-overlay.show .modal {
+            transform: translateY(0) scale(1);
+        }
+
+        .modal h2 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 22px;
+            color: var(--text-primary);
+        }
+
+        .users-page .form-group {
+            margin-bottom: 16px;
+        }
+
+        .users-page .form-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .users-page .form-group input,
+        .users-page .form-group select {
+            width: 100%;
+            padding: 11px 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .users-page .form-group input:focus,
+        .users-page .form-group select:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .users-page .form-group input::placeholder {
+            color: rgba(148, 163, 184, 0.5);
+        }
+
+        .users-page .form-group input:disabled {
+            background: var(--bg-hover);
+            color: var(--text-secondary);
+            cursor: not-allowed;
+        }
+
+        .ghost-btn {
+            padding: 10px 18px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background: transparent;
+            color: var(--text-primary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .ghost-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent-primary);
+        }
+
+        .hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .error-text {
+            color: var(--accent-danger);
+            font-size: 12px;
+            min-height: 18px;
+            margin-top: 5px;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* 分页 */
+        .users-pagination {
+            padding: 14px 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .page-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .page-btns {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .page-btns .page-btn {
+            min-width: 32px;
+            height: 32px;
+            padding: 0 8px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .page-btns .page-btn:hover:not(:disabled) {
+            border-color: var(--accent-primary);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .page-btns .page-btn.active {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .page-btns .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .page-btns .page-ellipsis {
+            color: var(--text-secondary);
+            padding: 0 4px;
+            font-size: 13px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .users-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .user-toolbar {
+                width: 100%;
+            }
+
+            .user-toolbar input {
+                flex: 1;
+                min-width: 0;
+            }
+
+            .users-table th,
+            .users-table td {
+                padding: 10px 12px;
+            }
+
+            .users-table th:nth-child(2),
+            .users-table td:nth-child(2) {
+                display: none;
+            }
+
+            .users-pagination {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .page-btns {
+                justify-content: center;
+            }
+
+            .row-actions {
+                flex-direction: column;
+                gap: 4px;
+            }
+
+            .row-actions button {
+                width: 100%;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
+    <link rel="stylesheet" href="css/users-workbench.css?v=20261021-1">
+</head>
+<body class="users-page">
+    <!-- 全局顶部导航 -->
+    <nav id="global-nav" class="global-nav" aria-label="主导航">
+        <a class="nav-brand" href="live.html">
+            <img class="ui-icon" src="vendor/tabler-icons/radar-2.svg" alt="" aria-hidden="true">
+            <span class="nav-title">
+                车载雷达点云系统
+                <span class="brand-caption">
+                    车辆测量工作台
+                </span>
+            </span>
+        </a>
+        <div class="nav-account">
+            <span id="navRole">
+                当前用户
+            </span>
+            <span id="navUser">
+            </span>
+            <a href="#" id="navLogout" title="退出登录">
+                退出
+            </a>
+        </div>
+        <div class="nav-links">
+            <span class="nav-group">
+                现场作业
+            </span>
+            <a href="live.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/antenna.svg" alt="" aria-hidden="true">
+                空车尺寸测量
+            </a>
+            <a href="load-radar.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/cube.svg" alt="" aria-hidden="true">
+                载货体积
+            </a>
+            <a href="index.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/file-description.svg" alt="" aria-hidden="true">
+                空车档案
+            </a>
+            <span class="nav-group management">
+                管理
+            </span>
+            <a href="volume-query.html" class="nav-link" data-role="admin,viewer">
+                <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                体积查询
+            </a>
+            <a href="logs.html" class="nav-link">
+                <img class="ui-icon" src="vendor/tabler-icons/notes.svg" alt="" aria-hidden="true">
+                日志
+            </a>
+            <a href="users.html" class="nav-link active" aria-current="page" data-role="admin">
+                <img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">
+                用户管理
+            </a>
+        </div>
+    </nav>
+
+    <!-- 主布局 -->
+    <div id="main-layout">
+        <main class="users-container">
+            <header class="users-header">
+                <h1>
+                    <span class="header-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true"></span>
+                    用户管理
+                </h1>
+                <p>管理系统用户账号，仅管理员可进行新增、编辑和删除等操作。</p>
+            </header>
+
+            <div class="user-toolbar">
+                <div class="user-search">
+                    <img class="ui-icon" src="vendor/tabler-icons/search.svg" alt="" aria-hidden="true">
+                    <input type="text" id="searchInput" aria-label="搜索用户名或显示名称" placeholder="搜索用户名或显示名称...">
+                </div>
+                <button class="primary-btn" id="addUserBtn">
+                    <span aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/plus.svg" alt="" aria-hidden="true"></span> 新增用户
+                </button>
+            </div>
+
+            <section class="users-table-wrapper" aria-label="用户账号">
+                <div class="users-table-scroll" role="region" aria-label="用户列表，可横向滚动" tabindex="0">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 70px;">ID</th>
+                                <th>用户名</th>
+                                <th>显示名称</th>
+                                <th>角色</th>
+                                <th>状态</th>
+                                <th>最近登录</th>
+                                <th style="width: 220px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <!-- 动态生成 -->
+                        </tbody>
+                    </table>
+                    <div id="usersEmpty" class="users-empty" role="status" style="display:none;">
+                        <img class="ui-icon" src="vendor/tabler-icons/users.svg" alt="" aria-hidden="true">
+                        <span>暂无用户</span>
+                    </div>
+                </div>
+                <nav class="users-pagination" aria-label="用户分页">
+                    <span class="page-info" id="pageInfo" role="status">正在加载用户…</span>
+                    <div class="users-pagination-actions">
+                        <div class="page-btns" id="pageBtns"></div>
+                        <span class="users-page-size">10 条/页</span>
+                    </div>
+                </nav>
+            </section>
+        </main>
+    </div>
+
+    <!-- 新增/编辑用户弹窗 -->
+    <div class="modal-overlay" id="userModal" aria-hidden="true">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+            <h2 id="modalTitle">新增用户</h2>
+            <form id="userForm">
+                <input type="hidden" id="userId">
+                <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input type="text" id="username" maxlength="64" placeholder="请输入用户名（1-64字符）" autocomplete="off">
+                    <div class="error-text" id="usernameError"></div>
+                </div>
+                <div class="form-group" id="passwordGroup">
+                    <label for="password" id="passwordLabel">初始密码</label>
+                    <input type="password" id="password" maxlength="128" placeholder="12–128 位" autocomplete="new-password" aria-describedby="passwordHint passwordError">
+                    <p class="hint" id="passwordHint">密码为 12–128 位；编辑时留空则不修改。</p>
+                    <div class="error-text" id="passwordError"></div>
+                </div>
+                <div class="form-group">
+                    <label for="displayName">显示名称</label>
+                    <input type="text" id="displayName" maxlength="128" placeholder="请输入显示名称">
+                </div>
+                <div class="form-group">
+                    <label for="roleCode">角色</label>
+                    <select id="roleCode">
+                        <option value="viewer">查看者（仅查看日志与点云）</option>
+                        <option value="admin">系统管理员（全部权限）</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="status">状态</label>
+                    <select id="status">
+                        <option value="1">启用</option>
+                        <option value="0">禁用</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="ghost-btn" id="modalCancel">取消</button>
+                    <button type="submit" class="primary-btn" id="modalSave">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 脚本 -->
+    <script src="js/api-config.js?v=1"></script>
+    <script src="js/auth-guard.js"></script>
+    <script src="js/api-client.js?v=2"></script>
+    <script src="js/nav.js?v=20261012-1"></script>
+    <script src="js/users.js?v=20261021-1"></script>
+</body>
+</html>

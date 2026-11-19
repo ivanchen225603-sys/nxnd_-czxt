@@ -1,0 +1,208 @@
+/*
+ * 三个现场页面（双雷达尺寸 live、空车档案 index、载货体积 load-radar）的统一布局层。
+ * 只调整布局与排版，沿用 admin-shell 的颜色变量；不改元素 id、脚本或接口。
+ * 统一结构：页头（标题 + 一行说明，右侧次要入口）→ 操作条（唯一主按钮）→
+ * 左侧深色点云、右侧信息面板；次要内容折叠。各页按 body class 作用域隔离。
+ */
+
+/* ── 共用：页头右侧的次要入口统一成描边按钮 ── */
+.live-page .page-heading > a,
+.load-radar-page #openHistory {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 6px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--accent-primary);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.live-page .page-heading > a:hover,
+.load-radar-page #openHistory:hover {
+    background: var(--bg-hover);
+}
+
+/* ── 双雷达尺寸：点云在左，采集结果在右 ── */
+.live-page .page-heading {
+    align-items: center;
+    margin-bottom: 16px;
+}
+.live-page .capture-toolbar {
+    padding: 14px 18px;
+}
+@media (min-width: 1181px) {
+    .live-page .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+        grid-template-areas:
+            "heading heading"
+            "toolbar toolbar"
+            "banner  banner"
+            "preview summary"
+            "details summary";
+        column-gap: 16px;
+        align-items: start;
+    }
+    .live-page .workspace > .page-heading { grid-area: heading; }
+    .live-page .workspace > .capture-toolbar { grid-area: toolbar; }
+    .live-page .workspace > #previewBanner { grid-area: banner; }
+    .live-page .workspace > .preview-surface { grid-area: preview; min-width: 0; }
+    .live-page .workspace > .preview-diagnostics { grid-area: details; min-width: 0; }
+    .live-page .workspace > .result-summary {
+        grid-area: summary;
+        min-width: 0;
+        margin-top: 0;
+        /* 结果卡跟随视口停留，滚动看连接详情时尺寸仍可见。 */
+        position: sticky;
+        top: calc(var(--nav-height) + 16px);
+    }
+    .live-page .result-summary-heading {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .live-page .result-summary-heading .live-btn {
+        width: 100%;
+    }
+}
+
+/* ── 空车档案：查询操作条 + 左点云右尺寸 ── */
+.archive-page #top-toolbar h1 {
+    margin: 0;
+}
+.archive-page .archive-description {
+    margin: 4px 0 14px;
+}
+.archive-page .toolbar-buttons {
+    padding: 14px 18px;
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.archive-page .toolbar-buttons .btn-row {
+    margin-left: auto;
+}
+.archive-page .plate-search-input,
+.archive-page .toolbar-btn {
+    min-height: 40px;
+    height: 40px;
+}
+.archive-page #statusFPS {
+    display: none;
+}
+.archive-page .dimension-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 14px;
+}
+.archive-page .dimension-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.archive-page .dimension-item span {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+.archive-page .dimension-item strong {
+    font-size: 19px;
+    font-weight: 650;
+    line-height: 1.25;
+    font-variant-numeric: tabular-nums;
+}
+.archive-page #control-panel > summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 15px;
+    padding: 6px 0;
+    list-style-position: inside;
+}
+.archive-page #control-panel[open] > summary {
+    margin-bottom: 4px;
+}
+
+/* ── 载货体积：页头一行、通道胶囊另起一行、卡片内点云左车辆右 ── */
+.load-radar-page .radar-header {
+    flex-wrap: wrap;
+    row-gap: 10px;
+}
+.load-radar-page .radar-header .chantabs {
+    order: 10;
+    flex: 0 0 100%;
+}
+.load-radar-page .channel-total {
+    padding: 4px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: #fff;
+    font-size: 13px;
+}
+.load-radar-page .channel-total b {
+    font-size: 15px;
+}
+.load-radar-page .card .body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(170px, 1fr);
+    grid-template-areas:
+        "cloud kpis"
+        "note  note"
+        "health health";
+    gap: 10px 14px;
+    padding: 12px;
+    align-items: start;
+}
+.load-radar-page .card .body > .cloud-preview { grid-area: cloud; min-width: 0; }
+.load-radar-page .card .body > .kpis { grid-area: kpis; min-width: 0; }
+.load-radar-page .card .body > .sub { grid-area: note; }
+.load-radar-page .card .body > .chan-health { grid-area: health; }
+.load-radar-page .card .kpis {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 2px 0 0;
+}
+.load-radar-page .card .kpi,
+.load-radar-page .card .kpi:first-child,
+.load-radar-page .card .kpi.time {
+    padding: 0;
+    border-left: 0;
+}
+.load-radar-page .card .kpi-plate .v {
+    font-size: 17px;
+    font-weight: 650;
+}
+.load-radar-page .card .kpi-volume .v {
+    font-size: 32px;
+}
+.load-radar-page .card .kpi.time {
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+}
+.load-radar-page .card canvas.cloud {
+    height: 230px;
+}
+.load-radar-page .live-layout.view-single .card .body {
+    grid-template-columns: minmax(0, 2.4fr) minmax(220px, 1fr);
+}
+@media (max-width: 560px) {
+    .load-radar-page .card .body {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "kpis" "cloud" "note" "health";
+    }
+    .load-radar-page .live-layout.view-single .card .body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .load-radar-page .card .kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .load-radar-page .card .kpi.time {
+        border-top: 0;
+        padding-top: 0;
+    }
+}

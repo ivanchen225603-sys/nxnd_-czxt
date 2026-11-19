@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup>
+    <LadarSdkRoot Condition="'$(LadarSdkRoot)' == ''">$(MSBuildThisFileDirectory)vendor\ladar-sdk</LadarSdkRoot>
+  </PropertyGroup>
+</Project>

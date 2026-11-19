@@ -1,0 +1,313 @@
+/* 载货体积四路总览；保留单通道查看与原有运行记录。 */
+body.load-radar-page {
+    --tx3: #536580;
+}
+.load-radar-page .radar-header {
+    padding: 18px 24px 12px;
+    gap: 12px;
+}
+.load-radar-page .brand {
+    font-size: 24px;
+}
+.load-radar-page .channel-total {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.load-radar-page .channel-total b {
+    color: #2563eb;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+}
+.load-radar-page #openHistory {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #1d4ed8;
+}
+.load-radar-page .chantabs {
+    padding-top: 0;
+    margin-top: 0;
+    border: 0;
+}
+.load-radar-page .radar-main {
+    padding: 16px 24px 32px;
+    width: 100%;
+    min-width: 0;
+}
+.load-radar-page .live-layout > * {
+    width: 100%;
+    min-width: 0;
+}
+.load-radar-page .empty-note {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    text-align: left;
+    color: #854d0e;
+    background: #fff7e6;
+    border-radius: 6px;
+}
+.load-radar-page .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.load-radar-page .card {
+    border-radius: 8px;
+}
+.load-radar-page .card h2 {
+    padding: 10px 14px;
+    font-size: 17px;
+    border-color: var(--border-color);
+}
+.load-radar-page .card .badge {
+    margin-left: auto;
+    font-size: 13px;
+    border: 0;
+}
+.load-radar-page .card .body {
+    padding: 0 8px 10px;
+    gap: 6px;
+}
+.load-radar-page .kpis {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr);
+    gap: 0;
+    padding: 12px 6px 8px;
+    align-items: start;
+}
+.load-radar-page .kpi {
+    padding: 0 10px;
+    border-radius: 0;
+    border-left: 1px solid var(--border-color);
+}
+.load-radar-page .kpi:first-child {
+    padding-left: 0;
+    border-left: 0;
+}
+.load-radar-page .kpi .k {
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+.load-radar-page .kpi .v {
+    margin: 0;
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+}
+.load-radar-page .kpi-volume .v {
+    display: inline;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -.5px;
+}
+.load-radar-page .volume-estimate {
+    display: inline;
+    font-size: 11px;
+    color: #92400e;
+    white-space: nowrap;
+}
+.load-radar-page .result-volume.is-estimate {
+    color: #92400e;
+}
+.load-radar-page .kpi.time {
+    grid-column: auto;
+    padding: 0 0 0 10px;
+}
+.load-radar-page .kpi.time .v {
+    font-size: 12px;
+    font-weight: 400;
+}
+.load-radar-page .card .verdict {
+    min-height: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+}
+.load-radar-page .card .verdict .big {
+    display: inline-block;
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: 0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #536580;
+    background: #eef2f7;
+    overflow-wrap: anywhere;
+}
+.load-radar-page .card .verdict.is-loaded .big {
+    color: #047857;
+    background: #ecfdf5;
+}
+.load-radar-page .card .verdict.is-empty .big {
+    color: #1d4ed8;
+    background: #eff6ff;
+}
+.load-radar-page .card .verdict.is-warn .big {
+    color: #92400e;
+    background: #fff7e6;
+}
+.load-radar-page .card canvas.cloud {
+    height: 200px;
+    border-radius: 6px;
+}
+.load-radar-page .cloud-preview {
+    position: relative;
+}
+.load-radar-page .cloud-legend {
+    position: absolute;
+    inset: 10px 12px 8px;
+    gap: 10px;
+    padding: 0;
+    font-family: inherit;
+    color: #b8c8dc;
+    pointer-events: none;
+    align-items: end;
+}
+.load-radar-page .cloud-legend .freeze {
+    position: absolute;
+    right: 0;
+    top: 0;
+    min-height: 26px;
+    font-size: 12px;
+    background: #15243a;
+    color: #dbeafe;
+    border-color: #536580;
+    pointer-events: auto;
+}
+.load-radar-page .cloud-footer {
+    position: absolute;
+    inset: auto 12px 30px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0;
+    font-size: 12px;
+    color: #b8c8dc;
+    pointer-events: none;
+}
+.load-radar-page .cloud-footer .canvas-status {
+    color: #b8c8dc;
+}
+.load-radar-page .cloud-help {
+    text-align: right;
+}
+.load-radar-page .card .sub {
+    color: var(--text-secondary);
+    font-size: 12px;
+    padding: 0 6px;
+    overflow-wrap: anywhere;
+}
+.load-radar-page .card .sub:empty {
+    display: none;
+}
+.load-radar-page .card .chan-health {
+    margin: 0 6px;
+    padding: 4px 8px;
+}
+.load-radar-page .logs-heading h2 {
+    font-size: 19px;
+}
+.load-radar-page .lane-log table {
+    font-family: inherit;
+    font-size: 13px;
+}
+.load-radar-page .lane-log td:last-child {
+    white-space: normal;
+}
+.load-radar-page .runtime-log-section {
+    min-width: 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.load-radar-page .runtime-log-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #f7f9fc;
+}
+.load-radar-page .runtime-log-heading h4,
+.load-radar-page .saved-log-heading {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+.load-radar-page .saved-log-heading {
+    padding: 8px 12px 0;
+}
+.load-radar-page .runtime-log-feedback {
+    margin: 0;
+    padding: 6px 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.load-radar-page .runtime-log-empty {
+    padding: 12px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+.load-radar-page .lane-log .log-empty {
+    height: 100px;
+}
+.load-radar-page .live-layout.view-single {
+    display: flex;
+    flex-direction: column;
+    /* 重置旧双栏网格的 start，防止画布和日志按各自固有宽度收缩。 */
+    align-items: stretch;
+}
+.load-radar-page .live-layout.view-single #loadLanes .cloud {
+    height: min(52vh, 520px);
+    min-height: 300px;
+}
+.load-radar-page .live-layout.view-single .log-table-scroll {
+    min-height: 0;
+    max-height: 360px;
+}
+.load-radar-page .runtime-log-scroll,
+.load-radar-page .live-layout.view-single .runtime-log-scroll {
+    min-height: 0;
+    max-height: 280px;
+}
+@media (max-width: 1180px) {
+    .load-radar-page .kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        row-gap: 12px;
+    }
+    .load-radar-page .kpi-status {
+        padding-left: 0;
+        border-left: 0;
+    }
+}
+@media (max-width: 760px) {
+    .load-radar-page .radar-header {
+        padding: 14px 16px 12px;
+    }
+    .load-radar-page .brand {
+        flex: 0 0 100%;
+        font-size: 22px;
+    }
+    .load-radar-page .radar-header .spacer {
+        display: none;
+    }
+    .load-radar-page .radar-main {
+        padding: 16px;
+    }
+    .load-radar-page .grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .load-radar-page .card canvas.cloud {
+        height: 230px;
+    }
+    .load-radar-page .cloud-legend .freeze {
+        min-height: 36px;
+        padding: 6px 12px;
+    }
+    .load-radar-page .cloud-footer {
+        flex-wrap: wrap;
+    }
+    .load-radar-page .live-layout.view-single #loadLanes .cloud {
+        height: 340px;
+        min-height: 0;
+    }
+}

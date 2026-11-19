@@ -1,0 +1,84 @@
+# Build outputs
+**/bin/
+**/obj/
+**/build/
+**/dist/
+**/publish*/
+**/artifacts/
+
+# Python environments and caches
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+**/env/
+**/.coverage
+**/htmlcov/
+
+# IDE and test outputs
+**/.vs/
+**/.idea/
+**/.trae/
+**/TestResults/
+**/*.user
+**/*.suo
+
+# Runtime data and logs
+**/logs/
+**/reports/
+**/uploads/
+**/.uploads/
+**/data/
+# 载货雷达现场原始 UDP 抓包（单个约 188 MB），属于数据
+/CarPointCloudLoadRadar/re/captures/
+**/*.log
+**/*.pcd
+**/*.pcap
+**/*.pcapng
+/CarPointCloudLoadRadar/baseline/
+/CarPointCloud_Analyzer_fixed/tests/fixtures/23363_front_body.npz
+/CarPointCloud_Analyzer_fixed/tests/fixtures/23364_front_body.npz
+/CarPointCloud_Analyzer_fixed/tests/fixtures/floor_wall_support.npz
+/CarPointCloudLadarWorker/vendor/ladar-sdk/
+
+# Release and deployment bundles
+**/deploy/
+**/packaging/
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.whl
+
+# Local and production secrets
+/CarPointCloud_Analyzer_fixed/appsettings.json
+/CarPointCloudWebApi/appsettings.json
+/CarPointCloudWebApi/appsettings.Development.json
+/CarPointCloudLoadRadar/config/dual-radar-recorder.json
+# 载货雷达节点配置含节点密钥（AgentKey），只提交 load-radar.example.json
+/CarPointCloudWebApi/config/load-radar.json
+**/appsettings.Local.json
+**/appsettings.Production.json
+**/secrets.json
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local assistant notes (not product source)
+**/.workbuddy/
+/.codex-attachments/
+
+# 本地交接与过程记录
+/AGENTS.md
+/CarPointCloudLadarWorker/AGENTS.md
+/CarPointCloudLoadRadar/CLAUDE.md
+/CarPointCloudWebApi/AGENTS.md
+/CarPointCloud_Analyzer_fixed/AGENTS.md
+/.ai-lifecycle/
+
+# OS files
+**/Thumbs.db
+**/Desktop.ini
+**/.DS_Store

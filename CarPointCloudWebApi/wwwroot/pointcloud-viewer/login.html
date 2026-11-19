@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统登录 - 车载雷达点云系统</title>
+    <link rel="stylesheet" href="css/style.css?v=8">
+    <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
+    <link rel="stylesheet" href="css/login-workbench.css?v=20261022-1">
+</head>
+<body class="login-page">
+    <main class="login-container">
+        <section class="login-showcase" aria-label="车载雷达点云系统">
+            <a class="login-brand" href="login.html" aria-label="车载雷达点云系统登录页">
+                <span class="login-brand-mark" aria-hidden="true"><img src="vendor/tabler-icons/radar-2.svg" alt=""></span>
+                <span class="login-brand-name">车载雷达点云系统<span>车辆测量工作台</span></span>
+            </a>
+            <div class="login-introduction">
+                <p class="login-headline">让每一次车辆测量<br>清晰可见</p>
+                <p class="login-tagline">车载雷达点云系统</p>
+            </div>
+            <img class="login-pointcloud" src="assets/login-pointcloud-truck.png" alt="" aria-hidden="true" fetchpriority="high" width="1448" height="1086">
+        </section>
+        <section class="login-panel" aria-labelledby="loginTitle">
+            <div class="login-card">
+                <div class="login-header">
+                    <h1 id="loginTitle">登录工作台</h1>
+                    <p>使用您的账号继续工作</p>
+                </div>
+
+                <form id="loginForm" class="login-form" novalidate>
+                    <div class="form-group">
+                        <label for="username">用户名</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/user.svg" alt="" aria-hidden="true"></span>
+                            <input
+                                type="text"
+                                id="username"
+                                name="username"
+                                placeholder="请输入用户名"
+                                autocomplete="username"
+                                aria-describedby="usernameError"
+                                required
+                            >
+                        </div>
+                        <span class="error-message" id="usernameError" aria-live="polite"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">密码</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/lock.svg" alt="" aria-hidden="true"></span>
+                            <input
+                                type="password"
+                                id="password"
+                                name="password"
+                                placeholder="请输入密码"
+                                autocomplete="current-password"
+                                aria-describedby="passwordError"
+                                required
+                            >
+                            <button type="button" class="toggle-password" id="togglePassword" aria-label="显示密码" aria-pressed="false">
+                                <span class="toggle-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/eye.svg" alt="" aria-hidden="true"></span>
+                            </button>
+                        </div>
+                        <span class="error-message" id="passwordError" aria-live="polite"></span>
+                    </div>
+
+                    <div class="form-options">
+                        <label class="remember-me">
+                            <input type="checkbox" id="rememberMe" name="rememberMe">
+                            <span>记住用户名</span>
+                        </label>
+                        <a href="#" class="forgot-link" id="forgotLink">忘记密码？</a>
+                    </div>
+
+                    <button type="submit" class="login-btn" id="loginBtn">
+                        <span class="btn-icon" aria-hidden="true"><img class="ui-icon" src="vendor/tabler-icons/login.svg" alt=""></span>
+                        登录工作台
+                    </button>
+                </form>
+
+                <div class="login-footer">
+                    <p>账号及密码由管理员分配</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 自定义脚本 -->
+    <script src="js/api-config.js?v=1"></script>
+    <script src="js/login.js?v=20261105-1"></script>
+</body>
+</html>

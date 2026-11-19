@@ -1,0 +1,8 @@
+-- Deprecated wrapper.  The old START-based script was not portable between
+-- disql installations and depended on SQL Server-style DMSQL blocks.
+-- For a new, empty CarPointCloud schema run from the package root:
+--   disql <connection> < database/dm8_fresh_init.sql
+-- For an existing v6 schema with business data, preserve all history and run:
+--   disql <connection> < database/dm8_upgrade_v6_to_v7_empty_vehicle_profile.sql
+-- For an existing v7 schema with business data, preserve all history and run:
+--   disql <connection> < database/dm8_upgrade_v7_to_v8_integration_audit.sql

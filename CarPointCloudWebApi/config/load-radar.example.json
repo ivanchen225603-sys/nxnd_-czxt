@@ -1,0 +1,20 @@
+{
+  "LoadRadar": {
+    "Enabled": false,
+    "DimensionScanChannelId": "",
+    "StorageRoot": "/data/carpointcloud/load-radar",
+    "Nodes": [
+      {
+        "NodeId": "jt128-01",
+        "AgentKey": "",
+        "BaseUrl": "http://127.0.0.1:8080",
+        "Channels": [
+          { "ChannelId": "CH1", "CameraIdentifier": "CAM_001", "Name": "1号通道" },
+          { "ChannelId": "CH2", "CameraIdentifier": "CAM_002", "Name": "2号通道" },
+          { "ChannelId": "CH3", "CameraIdentifier": "CAM_003", "Name": "3号通道" },
+          { "ChannelId": "CH4", "CameraIdentifier": "CAM_004", "Name": "4号通道" }
+        ]
+      }
+    ]
+  }
+}
