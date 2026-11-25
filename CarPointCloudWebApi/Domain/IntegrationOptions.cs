@@ -18,7 +18,7 @@ public class IntegrationOptions
     /// <summary>双方约定的接口密钥，用于生成和校验小写 MD5 签名。</summary>
     public string AppSecret { get; set; } = string.Empty;
 
-    /// <summary>Timestamp 允许偏移秒数，超过该窗口认为请求过期。</summary>
+    /// <summary>除煤量和车辆尺寸 GET 查询外，签名请求的 Timestamp 允许偏移秒数。</summary>
     public int TimestampToleranceSeconds { get; set; } = 60;
 
     /// <summary>同一 IP + 路径每秒速率；对外尺寸/煤量最多 3 次，分别超限返回 429/400。</summary>

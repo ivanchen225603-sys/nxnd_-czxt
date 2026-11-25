@@ -169,7 +169,7 @@ public sealed class RadarLiveContractTests
     [Theory]
     [InlineData("宁A10333F", "宁A10333F")]
     [InlineData("  宁a10333f  ", "宁A10333F")]
-    [InlineData("宁A 80028 D", "宁A10333F")]
+    [InlineData("宁A 10333 F", "宁A10333F")]
     public void ManualPlate_IsNormalizedToUppercaseWithoutWhitespace(string input, string expected)
     {
         Assert.True(ManualLicensePlate.TryNormalize(input, out var plate, out _));

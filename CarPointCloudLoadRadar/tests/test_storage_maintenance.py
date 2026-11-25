@@ -105,6 +105,24 @@ class TestStorageMaintenance(unittest.TestCase):
         os.utime(meta, (stamp, stamp))
         return path
 
+    def test_cleanup_reports_old_files_and_reasons_for_retaining_others(self):
+        expired = self.loose("expired.xyz")
+        recent = self.loose("recent.xyz", when=self.cutoff)
+        active = self.loose("active.xyz", passage="active-trip")
+        self.service.workers[0]._local_passage = "active-trip"
+        unfinished = self.output / "unfinished.xyz"
+        unfinished.write_bytes(b"in-progress")
+
+        report = self.cleanup.run_once()
+
+        self.assertFalse(expired.exists())
+        self.assertTrue(all(path.exists() for path in (recent, active, unfinished)))
+        self.assertEqual(report["loose_files_deleted"], 1)
+        self.assertEqual(report["loose_file_outcomes"]["newer_than_cutoff"], 1)
+        self.assertEqual(report["loose_file_outcomes"]["protected_passage"], 1)
+        self.assertEqual(report["loose_file_outcomes"]["missing_metadata"], 1)
+        self.assertIn("watermark=advanced", self.events[-1][1]["message"])
+
     def test_sent_complete_committed_clouds_purge_but_receipts_remain_across_restart(self):
         bundle, payload, path, original = self.archive("m-done")
         report = self.cleanup.run_once()

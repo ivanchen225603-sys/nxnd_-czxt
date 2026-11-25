@@ -1,6 +1,7 @@
 """本地03点普通点云维护；不接触DM8、正式NPZ或未完成的恢复材料。"""
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -42,6 +43,9 @@ class StorageMaintenance:
 
     def start(self):
         if self._thread is None:
+            self.service.bus.publish("warn", dict(channel="", message=
+                f"每日普通点云清理已启用 dailyAt={self.daily_at} "
+                f"timezone={datetime.now().astimezone().tzname()} root={self.data_root}"))
             self._thread = threading.Thread(target=self._run, name="pointcloud-daily-cleanup", daemon=True)
             self._thread.start()
 
@@ -64,7 +68,9 @@ class StorageMaintenance:
                 if isinstance(error, InterruptedError) and self._stop.is_set():
                     break
                 self.last_error = type(error).__name__
-                self.service.bus.publish("error", dict(channel="", error="每日点云清理暂未完成（%s），一分钟后重试" % self.last_error))
+                self.service.bus.publish("error", dict(channel="", error=
+                    f"每日点云清理未完成，水位未推进；{self._retry_interval:g} 秒后重试 "
+                    f"errorType={self.last_error} error={error}"))
             self._stop.wait(self._retry_interval)
 
     def due_cutoff(self, now):
@@ -118,13 +124,14 @@ class StorageMaintenance:
         return passages
 
     def _clean_loose(self, cutoff, protected_passages):
-        deleted = freed = 0
+        totals = Counter()
         def enumeration_failed(error):
             raise error
         for output in set(self.outputs.values()):
             self._check_stop()
             _safe_path(output)
             if not output.exists():
+                totals["missing_output"] += 1
                 continue
             for directory, directories, files in os.walk(output, followlinks=False, onerror=enumeration_failed):
                 safe_directories = []
@@ -149,28 +156,36 @@ class StorageMaintenance:
                     _safe_path(metadata)
                     # 旁注由原写入者在XYZ完成后保存；缺失/损坏时不猜文件已完成。
                     if not metadata.is_file():
+                        totals["missing_metadata"] += 1
                         continue
                     before = cloud.stat()
                     if before.st_mtime >= cutoff or metadata.stat().st_mtime >= cutoff:
+                        totals["newer_than_cutoff"] += 1
                         continue
                     try:
                         note = json.loads(metadata.read_text(encoding="utf-8-sig"))
                     except (ValueError, UnicodeError):
+                        totals["invalid_metadata"] += 1
                         continue
-                    if not isinstance(note, dict) or note.get("passage_id") in protected_passages:
+                    if not isinstance(note, dict):
+                        totals["invalid_metadata"] += 1
+                        continue
+                    if note.get("passage_id") in protected_passages:
+                        totals["protected_passage"] += 1
                         continue
                     _safe_path(cloud)
                     after = cloud.stat()
                     if (after.st_mtime_ns, after.st_size, after.st_ino) != (before.st_mtime_ns, before.st_size, before.st_ino):
+                        totals["changed_during_scan"] += 1
                         continue
                     cloud.unlink()
                     for suffix in (".meta.json", ".reason.txt"):
                         sidecar = Path(str(cloud) + suffix)
                         _safe_path(sidecar)
                         sidecar.unlink(missing_ok=True)
-                    deleted += 1
-                    freed += before.st_size
-        return deleted, freed
+                    totals["deleted"] += 1
+                    totals["deleted_bytes"] += before.st_size
+        return totals
 
     def _clean_journal(self, journal, connection, lock, cutoff, protected, outbox=False):
         cursor = 0
@@ -203,6 +218,9 @@ class StorageMaintenance:
         cutoff = self.due_cutoff(self._clock() if now is None else now)
         if cutoff is None:
             return None
+        cutoff_at = datetime.fromtimestamp(cutoff).isoformat(sep=" ")
+        self.service.bus.publish("warn", dict(channel="", message=
+            f"每日普通点云清理开始 cutoff={cutoff_at} roots={sorted(map(str, set(self.outputs.values())))}"))
         self._check_stop()
         # 所有清理专属DDL先成功，再做任何删除；失败留给后台下一轮，不影响采集启动。
         bridge = self.service.integration
@@ -222,7 +240,7 @@ class StorageMaintenance:
         protected, pending_passages = (self.service.deferred.store.cleanup_protection(cutoff)
                      if self.service.deferred is not None else (set(), set()))
         passages = self._protected_passages(cutoff) | pending_passages
-        files, file_bytes = self._clean_loose(cutoff, passages)
+        loose = self._clean_loose(cutoff, passages)
         total = [0, 0, 0]
         if bridge is not None:
             outbox = bridge.outbox
@@ -234,8 +252,13 @@ class StorageMaintenance:
             total = [left + right for left, right in zip(total, values)]
         self._check_stop()
         self._complete(cutoff)
-        self.last_report = dict(cutoff=cutoff, loose_files_deleted=files, file_bytes_deleted=file_bytes,
-            archives_purged=total[0], sqlite_bytes_reusable=total[1] + total[2])
-        self.service.bus.publish("warn", dict(channel="", message="每日普通点云清理完成；SQLite已删除内容转为可复用空间，不代表数据库文件立即缩小",
-                                             **self.last_report))
+        self.last_report = dict(cutoff=cutoff, loose_files_deleted=loose["deleted"],
+            file_bytes_deleted=loose["deleted_bytes"], archives_purged=total[0],
+            sqlite_bytes_reusable=total[1] + total[2], loose_file_outcomes=dict(loose),
+            protected_passages=len(passages), protected_measurements=len(protected))
+        self.service.bus.publish("warn", dict(channel="", message=
+            f"每日普通点云清理完成 cutoff={cutoff_at} watermark=advanced "
+            f"XYZdeleted={loose['deleted']} XYZbytes={loose['deleted_bytes']} archivesPurged={total[0]} "
+            f"sqliteBytesReusable={total[1] + total[2]} protectedPassages={len(passages)} "
+            f"protectedMeasurements={len(protected)} looseOutcomes={dict(loose)}", **self.last_report))
         return self.last_report

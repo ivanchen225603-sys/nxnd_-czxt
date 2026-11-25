@@ -14,19 +14,6 @@ public sealed class AnalyzerClient(HttpClient http, IOptions<LadarCaptureOptions
 
     private readonly LadarCaptureOptions _options = options.Value;
 
-    public async Task<bool> ReportUnavailableAsync(AnalysisRecord record, CancellationToken cancellationToken)
-    {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(2));
-        using var response = await http.PostAsJsonAsync(
-            $"{_options.AnalyzerServiceUrl.TrimEnd('/')}/analyze-pair/unavailable",
-            new { workflowId = record.WorkflowId, cameraA = record.CameraA, capturedAt = record.CapturedAt },
-            Json, deadline.Token);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<JsonObject>(Json, deadline.Token);
-        return result?["status"]?.GetValue<string>() is "recorded" or "unknown_workflow";
-    }
-
     /// <summary>分析一对 PCD，返回 completed 或 failed 的记录。</summary>
     public async Task<AnalysisRecord> AnalyzePairAsync(
         AnalysisRecord record, PairedPcdCapture pair, string? plate, CancellationToken cancellationToken)

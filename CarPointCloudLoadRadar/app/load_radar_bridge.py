@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -16,6 +17,8 @@ from typing import Dict, Optional
 
 from .load_radar_contract import BaselineCache, build_measurement, make_candidate, _hash
 from .load_radar_transport import BridgeConfig, HttpClient, HttpError, SQLiteOutbox, command_body
+
+logger = logging.getLogger(__name__)
 
 
 class BridgeConflict(ValueError):
@@ -91,8 +94,12 @@ class LoadRadarBridge(threading.Thread):
         self._closed = False
         self._async_preparation = False
         # 位置停稳通知（CH4 双雷达触发）：每车次一次，独立线程发送，不排在测量上传后面。
-        self._standstill_pending: Dict[str, str] = {}
+        self._standstill_observed: Dict[str, tuple[str, str]] = {}
+        self._standstill_pending: Dict[str, tuple[str, str]] = {}
         self._standstill_done: Dict[tuple, None] = {}
+        self._departure_pending: Dict[tuple[str, str], float] = {}
+        self._departure_wake = threading.Event()
+        self._departure_thread: Optional[threading.Thread] = None
         self._standstill_wake = threading.Event()
         self._standstill_thread: Optional[threading.Thread] = None
         # 同一队列只能由一个进程承载，避免两套通道共用业务 ID。
@@ -186,6 +193,7 @@ class LoadRadarBridge(threading.Thread):
                     self._projection_quit.wait(.2)
 
     def _quarantine(self, channel: str) -> None:
+        self._close_scan_passage(channel, self._lanes[channel]["passage"])
         self._loaded.pop(channel, None)
         self._prepared.pop(channel, None)
         self._starts.pop(channel, None)
@@ -249,6 +257,7 @@ class LoadRadarBridge(threading.Thread):
                 count, since = self._idle.get(channel, (0, now))
                 self._idle[channel] = (count + 1, since)
                 if count + 1 >= 3 and now - since >= .5:
+                    self._close_scan_passage(channel, lane["passage"])
                     self._loaded.pop(channel, None)
                     self._prepared.pop(channel, None)
                     self._starts.pop(channel, None)
@@ -269,12 +278,18 @@ class LoadRadarBridge(threading.Thread):
     def report_standstill(self, channel: str, passage: Optional[str]) -> bool:
         """位置停稳时由通道线程调用：本车次已登记且尚未通知过才排队，网络在后台线程。"""
         with self._lock:
-            prepared = self._prepared.get(channel)
-            if (self._closed or not passage or prepared is None or prepared[0] != passage
-                    or (channel, passage) in self._standstill_done
-                    or self._standstill_pending.get(channel) == passage):
+            if self._closed or not passage or self.current_passage(channel) != passage:
                 return False
-            self._standstill_pending[channel] = passage
+            observed = self._standstill_observed.get(channel)
+            if observed is None or observed[0] != passage:
+                observed = (passage, datetime.now(timezone.utc).isoformat())
+                self._standstill_observed[channel] = observed
+            prepared = self._prepared.get(channel)
+            if (prepared is None or prepared[0] != passage
+                    or (channel, passage) in self._standstill_done
+                    or self._standstill_pending.get(channel) == observed):
+                return False
+            self._standstill_pending[channel] = observed
             if self._standstill_thread is None:
                 self._standstill_thread = threading.Thread(target=self._standstill_loop, daemon=True,
                                                            name="load-radar-standstill")
@@ -282,31 +297,63 @@ class LoadRadarBridge(threading.Thread):
         self._standstill_wake.set()
         return True
 
+    def _close_scan_passage(self, channel: str, passage: Optional[str]) -> None:
+        """离场或失去连续观测时交给通知线程，雷达帧处理线程无需等待 HTTP。"""
+        self._standstill_observed.pop(channel, None)
+        scheduled = self._standstill_pending.pop(channel, None)
+        key = (channel, passage)
+        if passage and (scheduled is not None or key in self._standstill_done):
+            self._standstill_done.pop(key, None)
+            self._departure_pending[key] = time.monotonic() + 30
+            if self._departure_thread is None:
+                self._departure_thread = threading.Thread(target=self._departure_loop, daemon=True,
+                                                           name="load-radar-departure")
+                self._departure_thread.start()
+            self._departure_wake.set()
+
+    def _departure_loop(self) -> None:
+        while not self._quit.is_set():
+            self._departure_wake.clear()
+            with self._lock:
+                departures = list(self._departure_pending.items())
+            for key, retry_until in departures:
+                if self._quit.is_set():
+                    return
+                channel, passage = key
+                try:
+                    self.client.report_departure(dict(nodeId=self.config.node_id, channelId=channel,
+                                                      passageId=passage))
+                except HttpError as exc:
+                    if exc.retryable and time.monotonic() < retry_until:
+                        continue
+                    logger.warning("离场采集通知未确认 channel=%s passageId=%s", channel, passage)
+                with self._lock:
+                    self._departure_pending.pop(key, None)
+            self._departure_wake.wait(max(1.0, float(self.config.retry_sec)))
+
     def _standstill_loop(self) -> None:
         while not self._quit.is_set():
             self._standstill_wake.clear()
             with self._lock:
                 jobs = list(self._standstill_pending.items())
-            for channel, passage in jobs:
+            for channel, observed in jobs:
                 if self._quit.is_set():
                     return
+                passage, stopped_at = observed
                 if self.current_passage(channel) != passage:
-                    with self._lock:              # 车辆已离场或换车，不再通知
-                        if self._standstill_pending.get(channel) == passage:
-                            del self._standstill_pending[channel]
                     continue
                 try:
                     self.client.report_standstill(dict(nodeId=self.config.node_id, channelId=channel,
-                                                       passageId=passage))
+                                                       passageId=passage, stoppedAt=stopped_at))
                 except HttpError as exc:
                     if exc.retryable:
                         continue                  # 网络失败：车次仍在时下一轮重发
                 except Exception:                 # noqa: BLE001
                     continue
                 with self._lock:                  # 收到答复即结束本车次
-                    if self._standstill_pending.get(channel) == passage:
+                    if self._standstill_pending.get(channel) == observed:
                         del self._standstill_pending[channel]
-                    self._standstill_done[(channel, passage)] = None
+                        self._standstill_done[(channel, passage)] = None
                     while len(self._standstill_done) > 256:
                         self._standstill_done.pop(next(iter(self._standstill_done)))
             with self._lock:
@@ -1025,8 +1072,11 @@ class LoadRadarBridge(threading.Thread):
         self._quit.set()
         self._wake.set()
         self._standstill_wake.set()
+        self._departure_wake.set()
         if self._standstill_thread is not None:
             self._standstill_thread.join(timeout=self.config.timeout_sec + 2)
+        if self._departure_thread is not None:
+            self._departure_thread.join(timeout=self.config.timeout_sec + 2)
         if self.is_alive():
             self.join(timeout=min(60, self.config.timeout_sec * 2 + 2))
         if self.is_alive():

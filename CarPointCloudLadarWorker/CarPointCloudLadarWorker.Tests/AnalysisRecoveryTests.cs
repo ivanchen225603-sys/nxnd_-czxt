@@ -40,6 +40,36 @@ public sealed class AnalysisRecoveryTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PlateLookupFailureDoesNotConsumeAnAnalysisAttempt(bool timesOut)
+    {
+        var root = TestSupport.TempDirectory();
+        var options = Options.Create(TestSupport.Options(o =>
+        {
+            o.CaptureDirectory = root;
+            o.EnableApiRequests = true;
+            o.FetchLicensePlateOnCapture = true;
+            o.WebApiUrl = "http://127.0.0.1:1";
+            o.AppSecret = "test-secret";
+        }));
+        var handler = new Handler((_, _) => Task.FromResult(TestSupport.Json(Success)));
+        using var analyzerHttp = new HttpClient(handler);
+        using var plateHttp = new HttpClient(new FailedPlateLookup(timesOut));
+        using var worker = new AnalysisWorker(new AnalyzerClient(analyzerHttp, options),
+            new PlateClient(plateHttp, options, NullLogger<PlateClient>.Instance),
+            new AnalysisTaskStore(options), options, TimeProvider.System, NullLogger<AnalysisWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        worker.Enqueue(Pair(root));
+
+        Assert.Null((await WaitFor(worker, r => r.Stage == AnalysisStage.Completed)).Error);
+        await worker.StopAsync(CancellationToken.None);
+        var sent = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.Equal(string.Empty, sent["plate"]!.GetValue<string>());
+        Assert.Equal(0, Assert.Single(new AnalysisTaskStore(options).Load()).FailureCount);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
@@ -59,6 +89,7 @@ public sealed class AnalysisRecoveryTests
             {
                 var task = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
                 task["Record"]!["CapturedAt"] = JsonValue.Create(pair.Primary.CapturedAt);
+                task["UnavailablePublicationPending"] = true;
                 await File.WriteAllTextAsync(path, task.ToJsonString());
             }
             Assert.Empty(handler.Bodies);
@@ -258,49 +289,9 @@ public sealed class AnalysisRecoveryTests
         await worker.StartAsync(CancellationToken.None);
         worker.Enqueue(Pair(root));
         var result = await WaitFor(worker, r => r.Stage == AnalysisStage.Completed);
-        await handler.UnavailableSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
         Assert.False(result.HasDimensionPayload);
         Assert.Single(handler.Bodies);
-    }
-
-    [Fact]
-    public async Task UnreportedTerminalFailure_ResumesPublicationWithoutRerunningAnalysis()
-    {
-        var root = TestSupport.TempDirectory();
-        var pair = Pair(root);
-        var outage = new Handler((_, _) => Task.FromResult(TestSupport.Json("analysis failed", 503)),
-            unavailableStatus: 503);
-        var options = Options.Create(TestSupport.Options(o => o.CaptureDirectory = root));
-        var store = new AnalysisTaskStore(options);
-        using (var worker = Create(root, outage))
-        {
-            await worker.StartAsync(CancellationToken.None);
-            worker.Enqueue(pair);
-            await WaitFor(worker, r => r.PermanentFailure);
-            await outage.UnavailableSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            await worker.StopAsync(CancellationToken.None);
-        }
-        Assert.Equal(3, outage.Bodies.Count);
-        Assert.True(Assert.Single(store.Load()).UnavailablePublicationPending);
-
-        var online = new Handler((_, _) => throw new InvalidOperationException("不得重新分析已终局的任务"));
-        using var resumed = Create(root, online);
-        await resumed.StartAsync(CancellationToken.None);
-        await online.UnavailableSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (Assert.Single(store.Load()).UnavailablePublicationPending)
-        {
-            Assert.True(DateTime.UtcNow < deadline, "等待缺测上报回执落盘超时");
-            await Task.Delay(10);
-        }
-        await resumed.StopAsync(CancellationToken.None);
-        Assert.Empty(online.Bodies);
-        Assert.True(resumed.Find(pair.WorkflowId)!.PermanentFailure);
-        var report = JsonNode.Parse(Assert.Single(online.UnavailableBodies))!;
-        Assert.Equal(pair.WorkflowId, report["workflowId"]!.GetValue<string>());
-        Assert.Equal(pair.Primary.CameraIdentifier, report["cameraA"]!.GetValue<string>());
-        Assert.Equal(pair.Secondary.CapturedAt, report["capturedAt"]!.GetValue<DateTime>());
     }
 
     [Fact]
@@ -357,24 +348,21 @@ public sealed class AnalysisRecoveryTests
         }
     }
 
-    private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond,
-        int unavailableStatus = 200) : HttpMessageHandler
+    private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
         public ConcurrentQueue<string> Bodies { get; } = new();
-        public ConcurrentQueue<string> UnavailableBodies { get; } = new();
-        public TaskCompletionSource UnavailableSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
-            if (request.RequestUri!.AbsolutePath == "/analyze-pair/unavailable")
-            {
-                UnavailableBodies.Enqueue(body);
-                UnavailableSent.TrySetResult();
-                return TestSupport.Json("""{"status":"recorded"}""", unavailableStatus);
-            }
-            Bodies.Enqueue(body);
+            Bodies.Enqueue(await request.Content!.ReadAsStringAsync(cancellationToken));
             return await respond(request, cancellationToken);
         }
+    }
+
+    private sealed class FailedPlateLookup(bool timesOut) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            timesOut ? Task.FromException<HttpResponseMessage>(new TaskCanceledException("lookup timed out"))
+                     : Task.FromResult(TestSupport.Json("""{"code":200,"data":false}"""));
     }
 }

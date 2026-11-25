@@ -22,18 +22,16 @@ class AnalysisBackend(Protocol):
         """合并固定 A/B 双雷达的两份点云后分析。"""
         ...
 
-    async def record_dimension_unavailable(
-        self, workflow_id: str, camera: str, captured_at: datetime,
-    ) -> dict[str, str]:
-        """接收 Worker 的配对终局。"""
-        ...
-
     async def preview(self, payload: Any) -> dict[str, Any]:
         """只读补点预览，不写库、不建档案。"""
         ...
 
     async def health(self) -> dict[str, Any]:
         """返回服务能力与配置就绪情况。"""
+        ...
+
+    def startup(self) -> None:
+        """启动服务后台工作。"""
         ...
 
     def shutdown(self) -> None:
@@ -124,12 +122,6 @@ def build_http_app(service_factory: Callable[[], AnalysisBackend]):
                 captured_at=self.capturedAt,
             )
 
-    class PairUnavailablePayload(BaseModel):
-        """同一次配对没有可发布的尺寸结果。"""
-        workflowId: str = Field(..., min_length=1, max_length=128, pattern=r"^\S+$")
-        cameraA: str = Field(..., pattern=r"^[A-Za-z0-9_]{1,32}$")
-        capturedAt: datetime
-
     class PreviewPayload(BaseModel):
         """Worker 已配对并转换到 A 坐标系的抽样；禁止身份/路径/业务字段。"""
         model_config = {"extra": "forbid"}
@@ -143,6 +135,7 @@ def build_http_app(service_factory: Callable[[], AnalysisBackend]):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """在应用退出时等待线程池任务结束。"""
+        service.startup()
         try:
             yield
         finally:
@@ -178,13 +171,6 @@ def build_http_app(service_factory: Callable[[], AnalysisBackend]):
     async def analyze_pair(payload: PairAnalyzePayload) -> dict[str, Any]:
         """接收并执行固定 A/B 双雷达融合分析。"""
         return await _handle_service_call(lambda: service.analyze_pair(payload.to_request()))
-
-    @app.post("/analyze-pair/unavailable", include_in_schema=False)
-    async def record_dimension_unavailable(payload: PairUnavailablePayload) -> dict[str, str]:
-        """登记已结束的配对，无需再次运行分析。"""
-        return await _handle_service_call(lambda: service.record_dimension_unavailable(
-            payload.workflowId, payload.cameraA, payload.capturedAt,
-        ))
 
     @app.post("/preview-completion")
     async def preview_completion(payload: PreviewPayload) -> dict[str, Any]:

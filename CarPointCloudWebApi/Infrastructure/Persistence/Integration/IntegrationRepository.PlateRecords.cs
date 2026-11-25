@@ -68,9 +68,10 @@ public partial class IntegrationRepository
         DmConnection conn,
         DmTransaction tx,
         LicensePlateRecord record,
-        bool bindWorkflow)
+        bool bindWorkflow,
+        bool captureVerified = false)
     {
-        if (bindWorkflow &&
+        if (!captureVerified && bindWorkflow &&
             record.IsSuccess &&
             !string.IsNullOrWhiteSpace(record.WorkflowId) &&
             record.CaptureTime.HasValue)
@@ -216,6 +217,13 @@ public partial class IntegrationRepository
 
     private void ValidateCaptureClaim(DmConnection conn, DmTransaction tx, LicensePlateRecord record)
     {
+        if (CaptureAlreadyClaimed(conn, tx, record))
+            throw new InvalidOperationException("该摄像头的抓拍已绑定其他车次");
+        ValidateCaptureWindow(conn, tx, record);
+    }
+
+    private bool CaptureAlreadyClaimed(DmConnection conn, DmTransaction tx, LicensePlateRecord record)
+    {
         // 旧库的 CaptureTime 可能是 DATETIME（秒精度），而新库是 DATETIME(3)。
         // 以自然秒为抓拍唯一桶，避免驱动写入时截断毫秒后导致“同一抓拍”漏判。
         var captureSecond = new DateTime(
@@ -236,13 +244,8 @@ public partial class IntegrationRepository
         existingClaim.Parameters.Add("@NextCaptureSecond", DmDbType.DateTime).Value = captureSecond.AddSeconds(1);
         existingClaim.Parameters.Add("@EnterId", DmDbType.Clob).Value = (object?)record.EnterId ?? DBNull.Value;
         AddVarcharParam(existingClaim, "@WorkflowId", 128, record.WorkflowId, required: true);
-        var claimedBy = existingClaim.ExecuteScalar() as string;
-        if (!string.IsNullOrWhiteSpace(claimedBy))
-        {
-            throw new InvalidOperationException(
-                $"Plate capture {record.CameraIdentifier}/{record.CaptureTime:O} is already bound to workflow {claimedBy}.");
-        }
-        ValidateCaptureWindow(conn, tx, record);
+        existingClaim.CommandTimeout = _commandTimeoutSeconds;
+        return existingClaim.ExecuteScalar() is string { Length: > 0 };
     }
 
     private void ValidateCaptureWindow(DmConnection connection, DmTransaction transaction, LicensePlateRecord record)

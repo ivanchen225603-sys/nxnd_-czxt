@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 
 import numpy as np
 
@@ -105,6 +106,7 @@ class TestDetectorPose(unittest.TestCase):
 class StandstillClient:
     def __init__(self):
         self.calls = []
+        self.departures = []
         self.failures = 0
         self.event = threading.Event()
 
@@ -115,6 +117,10 @@ class StandstillClient:
             self.failures -= 1
             raise HttpError(None)
         return {"status": "dispatched"}
+
+    def report_departure(self, payload):
+        self.departures.append(payload)
+        return {"status": "closed"}
 
 
 class TestBridgeStandstillReport(unittest.TestCase):
@@ -148,11 +154,14 @@ class TestBridgeStandstillReport(unittest.TestCase):
         self.assertTrue(passage)
         # 未登记：不通知
         self.assertFalse(self.bridge.report_standstill("CH4", passage))
+        _, original_stopped_at = self.bridge._standstill_observed["CH4"]
         # 登记回执到达（任何状态都算，含等车牌）后，下一次调用即通知
         self.bridge._prepared["CH4"] = (passage, "awaiting_plate", None, time.monotonic())
         self.assertTrue(self.bridge.report_standstill("CH4", passage))
         self.assertEqual(self.wait_calls(1), 1)
-        self.assertEqual(self.client.calls[0], {"nodeId": "jt-test", "channelId": "CH4", "passageId": passage})
+        self.assertEqual(self.client.calls[0], {"nodeId": "jt-test", "channelId": "CH4", "passageId": passage,
+                                                "stoppedAt": original_stopped_at})
+        self.assertIsNotNone(datetime.fromisoformat(original_stopped_at).tzinfo)
         # 收到答复后，同一车次不再通知
         time.sleep(0.2)
         self.assertFalse(self.bridge.report_standstill("CH4", passage))
@@ -165,6 +174,7 @@ class TestBridgeStandstillReport(unittest.TestCase):
         self.client.failures = 1
         self.assertTrue(self.bridge.report_standstill("CH4", passage))
         self.assertEqual(self.wait_calls(2), 2)
+        self.assertEqual(self.client.calls[0], self.client.calls[1])
         time.sleep(0.2)
         self.assertFalse(self.bridge.report_standstill("CH4", passage))
 
@@ -173,6 +183,36 @@ class TestBridgeStandstillReport(unittest.TestCase):
         self.bridge._prepared["CH4"] = (passage, "ready", None, time.monotonic())
         self.assertFalse(self.bridge.report_standstill("CH4", "p-other"))
         self.assertFalse(self.bridge.report_standstill("CH4", None))
+
+    def test_departure_reports_old_passage_and_does_not_reuse_it(self):
+        passage = self.enter()
+        self.bridge._prepared["CH4"] = (passage, "awaiting_plate", None, time.monotonic())
+        self.assertTrue(self.bridge.report_standstill("CH4", passage))
+        self.assertEqual(self.wait_calls(1), 1)
+
+        entered, release = threading.Event(), threading.Event()
+        report = self.client.report_departure
+
+        def slow_departure(payload):
+            entered.set()
+            release.wait(10)
+            return report(payload)
+
+        self.client.report_departure = slow_departure
+        try:
+            next_passage = self.enter()
+            self.assertTrue(entered.wait(1))
+            self.assertNotEqual(passage, next_passage)
+            self.bridge._prepared["CH4"] = (next_passage, "awaiting_plate", None, time.monotonic())
+            self.assertTrue(self.bridge.report_standstill("CH4", next_passage))
+            self.assertEqual(self.wait_calls(2), 2)
+            self.assertFalse(self.client.departures)
+            self.assertEqual(self.client.calls[1]["passageId"], next_passage)
+        finally:
+            release.set()
+        self.bridge.close()
+        self.assertEqual(self.client.departures, [
+            {"nodeId": "jt-test", "channelId": "CH4", "passageId": passage}])
 
 
 if __name__ == "__main__":

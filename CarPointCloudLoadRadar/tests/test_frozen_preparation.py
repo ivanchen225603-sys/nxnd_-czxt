@@ -29,7 +29,8 @@ class TestFrozenPreparation(unittest.TestCase):
         self.bridge._frames = {"CH1": time.monotonic()}
         self.bridge._lanes = {"CH1": dict(channel="CH1", ready=0, passage=None, measurement=None)}
         for name in ("_starts", "_idle", "_loaded", "_prepared", "_reserved", "_uncommitted",
-                     "_commands", "_channel_contexts"):
+                     "_commands", "_channel_contexts", "_standstill_observed", "_standstill_pending",
+                     "_standstill_done"):
             setattr(self.bridge, name, {})
         self.bridge.cache = BaselineCache
         self.bridge.outbox = Mock()

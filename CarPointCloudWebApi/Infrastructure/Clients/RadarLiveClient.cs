@@ -22,8 +22,17 @@ public sealed class RadarLiveClient(IHttpClientFactory httpClientFactory)
     public Task<RadarWorkerResponse> GetAnalysisAsync(string workflowId, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Get, $"/api/radars/analysis?workflowId={Uri.EscapeDataString(workflowId)}", cancellationToken);
 
-    public Task<RadarWorkerResponse> StartScanAsync(string workflowId, CancellationToken cancellationToken) =>
-        SendAsync(HttpMethod.Post, $"/api/radars/scan-once?requestId={Uri.EscapeDataString(workflowId)}", cancellationToken);
+    public Task<RadarWorkerResponse> StartScanAsync(string workflowId, CancellationToken cancellationToken,
+        DateTimeOffset? captureUntil = null)
+    {
+        var path = $"/api/radars/scan-once?requestId={Uri.EscapeDataString(workflowId)}";
+        if (captureUntil is { } until)
+            path += "&captureUntil=" + Uri.EscapeDataString(until.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        return SendAsync(HttpMethod.Post, path, cancellationToken);
+    }
+
+    public Task<RadarWorkerResponse> EndPassageAsync(string workflowId, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, $"/api/radars/scan-once/passage-ended?requestId={Uri.EscapeDataString(workflowId)}", cancellationToken);
 
     public Task<RadarWorkerResponse> StopScanAsync(string workflowId, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, $"/api/radars/scan-once/stop?requestId={Uri.EscapeDataString(workflowId)}", cancellationToken);

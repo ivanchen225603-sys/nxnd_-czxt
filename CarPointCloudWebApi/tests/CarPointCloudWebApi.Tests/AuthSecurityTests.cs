@@ -62,24 +62,23 @@ public class AuthSecurityTests
     }
 
     [DatabaseFact]
-    public async Task ExpiredTimestamp_Returns401()
+    public async Task SignedQueryWithOldTimestamp_Returns200()
     {
         await Task.Delay(1100);
 
-        var expiredTimestamp = DateTimeOffset.UtcNow.AddSeconds(-120).ToUnixTimeMilliseconds().ToString();
-        var signature = AuthHelper.GenerateSignature(expiredTimestamp, TestConfiguration.AppSecret);
+        var oldTimestamp = DateTimeOffset.UtcNow.AddSeconds(-120).ToUnixTimeMilliseconds().ToString();
+        var signature = AuthHelper.GenerateSignature(oldTimestamp, TestConfiguration.AppSecret);
 
         var request = new HttpRequestMessage(HttpMethod.Get, TargetUrl);
-        request.Headers.Add("Timestamp", expiredTimestamp);
+        request.Headers.Add("Timestamp", oldTimestamp);
         request.Headers.Add("Signature", signature);
 
         var response = await _client.SendAsync(request);
         var content = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(content);
 
-        Assert.Equal(401, (int)response.StatusCode);
-        Assert.Equal(401, doc.RootElement.GetProperty("code").GetInt32());
-        Assert.Contains("Timestamp 已过期", doc.RootElement.GetProperty("message").GetString() ?? string.Empty);
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal(200, doc.RootElement.GetProperty("code").GetInt32());
     }
 
     [DatabaseFact]

@@ -5,38 +5,20 @@ namespace CarPointCloudWebApi.Infrastructure;
 
 public partial class IntegrationRepository
 {
-    // 失败行使用来车 ID 的负数作为只读游标；正式尺寸入库后自动排除该失败行。
-    private const string PartnerDimensionRows = """
-        (
-        SELECT
-        """ + VehicleDimensionColumns + """
-         FROM VehicleDimensionRecord
-        UNION ALL
-        SELECT -a.Id, a.SessionId, a.SessionId, NULL, NULL,
-               a.LicensePlate, a.DimensionUnavailableCamera, a.DimensionUnavailableAt, 'failed',
-               NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-               a.CreatedAt, a.DimensionUnavailableAt, NULL, NULL
-        FROM VehicleArrival a
-        WHERE a.DimensionUnavailableAt IS NOT NULL AND a.DimensionUnavailableCamera IS NOT NULL
-          AND a.PlateStatus = 'SUCCEEDED' AND a.LicensePlate IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM VehicleDimensionRecord d WHERE d.WorkflowId = a.SessionId)
-        ) PartnerDimensions
-        """;
-
     /// <inheritdoc />
     public async Task<List<VehicleDimensionRecord>> GetPartnerVehiclePageAsync(int take, DateTime? windowStart,
         DateTime asOf, DateTime? beforeTime, long? beforeId, CancellationToken token)
     {
-        ValidatePageArguments(ref take, beforeTime, beforeId, allowNegativeId: true);
+        ValidatePageArguments(ref take, beforeTime, beforeId);
         await using var connection = CreateConnection();
         await connection.OpenAsync(token);
-        using var command = PartnerPageCommand(connection, PartnerDimensionRows, VehicleDimensionColumns,
+        using var command = PartnerPageCommand(connection, "VehicleDimensionRecord", VehicleDimensionColumns,
             "GetTime", take, windowStart, asOf, beforeTime, beforeId);
         using var cancellation = CancelPartnerCommand(command, token);
         var records = new List<VehicleDimensionRecord>();
         await using (var reader = await command.ExecuteReaderAsync(token))
             while (await reader.ReadAsync(token)) records.Add(MapVehicleDimension(reader));
-        await LoadPartnerDimensionDetailsAsync(connection, records.Where(row => row.Id > 0).ToList(), token);
+        await LoadPartnerDimensionDetailsAsync(connection, records, token);
         return records;
     }
 

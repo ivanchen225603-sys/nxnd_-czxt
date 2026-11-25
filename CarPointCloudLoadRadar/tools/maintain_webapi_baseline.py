@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from app.load_radar_contract import BaselineCache
-from app.load_radar_transport import _NoRedirect, _safe_storage
+from app.adapters.bridge_boundary import _safe_storage
+from app.adapters.webapi_http import _NoRedirect
 
 
 def identifier(value):

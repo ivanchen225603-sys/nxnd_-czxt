@@ -4,8 +4,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from carpointcloud_analyzer.domain.inner_length_measurement import (
-    _balanced_points, measure_final_inner_end_faces,
+    _balanced_points, measure_final_inner_end_faces, select_rib_side_reference,
 )
+from carpointcloud_analyzer.domain.models import LongitudinalMeasurement
 
 
 def _wall(length, width=(-1.2, 1.2), height=(0., 2.), step=.025, slope=0.):
@@ -74,6 +75,71 @@ def test_better_supported_right_side_is_used_when_left_ends_are_missing():
     assert result.valid
     assert result.metadata['selectedSide'] == 'right'
     assert result.length == pytest.approx(10., abs=1e-6)
+
+
+@pytest.mark.parametrize('repaired,sign', [('right', 1), ('left', -1)])
+@pytest.mark.parametrize('completion_type', ['mirror', 'long_gap'])
+def test_rib_reference_uses_unrepaired_observed_wall_and_keeps_length_endpoints(repaired, sign, completion_type):
+    points = _sides()
+    # 补后两侧都足够测长；实测点中仅未补侧保留全高。
+    observed = points[(points[:, 0] * sign < 0) | (points[:, 2] < 1.3)]
+    length = LongitudinalMeasurement(.04, 9.83, (0., 0., sign * 1.2), {'selectedSide': repaired},
+                                     longitudinal_axis=(0., .999, -.04))
+    completion = ({'sideWall': {'side': repaired, 'repaired': True}} if completion_type == 'mirror'
+                  else {'cornerSeams': [{'side': repaired, 'longGapHeightRows': 8}]})
+    ref = select_rib_side_reference(length, observed, 0., 10., 0., 2., completion)
+    assert ref.metadata['selectedSide'] == ('left' if sign > 0 else 'right')
+    assert ref.side_plane == pytest.approx((0., 0., -sign * 1.2), abs=1e-8)
+    assert (ref.rear_l, ref.front_l, ref.longitudinal_axis) == (length.rear_l, length.front_l, length.longitudinal_axis)
+    assert length.metadata == {'selectedSide': repaired}
+
+
+@pytest.mark.parametrize('weak', ['low_wall', 'short_of_front', 'missing_middle'])
+def test_repair_label_cannot_force_rib_reference_to_weak_observed_side(weak):
+    points = _sides()
+    # 三种不达标情况分别是二维覆盖不足、到不了前端、纵向覆盖不足。
+    left_ok = {'low_wall': points[:, 2] < .85, 'short_of_front': points[:, 1] < 9.5,
+               'missing_middle': np.abs(points[:, 1] - 5.) > 1.5}[weak]
+    observed = points[(points[:, 0] > 0) | left_ok]
+    length = _measure(observed)
+    ref = select_rib_side_reference(length, observed, 0., 10., 0., 2.,
+                                    {'sideWall': {'side': 'right', 'repaired': True}})
+    assert ref.metadata['selectedSide'] == 'right'
+    assert ref.metadata['source'] == 'observed_side_wall'
+
+
+def test_rib_reference_preserves_original_when_neither_observed_wall_qualifies():
+    points = _sides()
+    length = _measure(points)
+    observed = points[points[:, 2] < .85]
+    ref = select_rib_side_reference(length, observed, 0., 10., 0., 2.,
+                                    {'sideWall': {'side': length.metadata['selectedSide'], 'repaired': True}})
+    assert ref is length
+
+
+def test_short_corner_patch_cannot_supply_observed_rib_wall_endpoint():
+    points = _sides()
+    # 右侧仅靠常规角缝接到后端；左侧少一层高度，但实测到达两端。
+    raw = points[((points[:, 0] > 0) & (points[:, 1] > .55))
+                 | ((points[:, 0] < 0) & (points[:, 2] < 1.7))]
+    final = np.vstack((raw, points[(points[:, 0] > 0) & (points[:, 1] <= .55)]))
+    length = _measure(final)
+    assert length.metadata['selectedSide'] == 'right'
+    ref = select_rib_side_reference(length, raw, 0., 10., 0., 2., {
+        'cornerSeams': [{'side': 'right', 'synthesizedPoints': len(final) - len(raw), 'longGapHeightRows': 0}]})
+    assert ref.metadata['selectedSide'] == 'left'
+
+
+def test_rib_reference_checks_longitudinal_coverage_even_without_wall_repairs():
+    points = _sides()
+    raw = points[((points[:, 0] > 0) & (np.abs(points[:, 1] - 5.) > 1.25))
+                 | ((points[:, 0] < 0) & (points[:, 2] < 1.25))]
+    length = _measure(raw)
+    assert length.metadata['selectedSide'] == 'right'
+    assert length.metadata['sideLongitudinalCoverage'] < .85
+    ref = select_rib_side_reference(length, raw, 0., 10., 0., 2., {})
+    assert ref.metadata['selectedSide'] == 'left'
+    assert ref.metadata['sideLongitudinalCoverage'] == 1.
 
 
 def test_side_wall_short_of_end_walls_is_unavailable_not_shortened():

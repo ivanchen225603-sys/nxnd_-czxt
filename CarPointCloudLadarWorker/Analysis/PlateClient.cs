@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CarPointCloudLadarWorker.Config;
 using Microsoft.Extensions.Options;
@@ -26,12 +27,23 @@ public sealed class PlateClient(HttpClient http, IOptions<LadarCaptureOptions> o
         request.Headers.Add("X-Caller-System", "Worker");
         request.Headers.Add("X-Workflow-Id", workflowId);
 
-        using var response = await http.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        var result = response.IsSuccessStatusCode ? JsonNode.Parse(body) : null;
-        var plate = result?["code"]?.GetValue<int>() is 0 or 200 ? result["data"]?["licensePlate"]?.GetValue<string>() : null;
-        logger.LogInformation("按 workflow 获取车牌: workflowId={WorkflowId}, httpStatus={Status}, plate={Plate}",
-            workflowId, (int)response.StatusCode, plate);
-        return string.IsNullOrWhiteSpace(plate) ? null : plate;
+        try
+        {
+            using var response = await http.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var result = response.IsSuccessStatusCode ? JsonNode.Parse(body) : null;
+            var plate = result?["code"]?.GetValue<int>() is 0 or 200 ? result["data"]?["licensePlate"]?.GetValue<string>() : null;
+            logger.LogInformation("按 workflow 获取车牌: workflowId={WorkflowId}, httpStatus={Status}, plate={Plate}",
+                workflowId, (int)response.StatusCode, plate);
+            return string.IsNullOrWhiteSpace(plate) ? null : plate;
+        }
+        catch (Exception error) when (!cancellationToken.IsCancellationRequested &&
+            error is HttpRequestException or OperationCanceledException or JsonException or InvalidOperationException or FormatException)
+        {
+            // 尺寸计算和待办归档可以先开始，WebApi 自己的识牌任务仍独立执行。
+            logger.LogWarning("本次预取车牌失败，继续分析: workflowId={WorkflowId}, errorType={ErrorType}",
+                workflowId, error.GetType().Name);
+            return null;
+        }
     }
 }

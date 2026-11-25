@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
+import time
 from unittest.mock import Mock
 
 import numpy as np
@@ -169,7 +170,27 @@ def test_rectangular_pipeline_persists_only_with_resolved_final_floor(
     assert len(database.records) == 2
     if late_plate:
         assert not database.profiles
-        assert not list(storage.root.rglob('*.pcd'))
+        jobs = {job.payload["workflowId"]: job for job in storage.pending()}
+        assert set(jobs) == {"review-1", "review-2"}
+        expected_path = jobs["review-2"].profile.point_cloud_path
+        assert Path(expected_path).read_bytes() == Path(result['outputs']['pcd']).read_bytes()
+        Path(result['outputs']['pcd']).unlink()
+        database.arrivals["review-1"] = (None, "FAILED")
+        database.arrivals["review-2"] = ("川A12047", "SUCCEEDED")
+        # 重启 Analyzer，原计算输出已移除，依然可由待办补登。
+        restarted = service.AnalysisService(dimension_store=store, empty_profile_storage=storage)
+        try:
+            restarted.startup()
+            deadline = time.monotonic() + 3
+            while list(storage.pending()) and time.monotonic() < deadline:
+                time.sleep(.02)
+            assert not list(storage.pending())
+            assert list(storage.root.rglob('*.pcd')) == [Path(expected_path)]
+            assert database.profiles["川A12047"][1] == expected_path
+            assert database.record_plates[result['persistence']['recordId']] == "川A12047"
+            assert len(database.records) == 2
+        finally:
+            restarted.shutdown()
         return
     assert len(database.profiles) == 1
     records = [values for kind, values in database.details if kind == 'record']

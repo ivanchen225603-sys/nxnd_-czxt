@@ -1,5 +1,7 @@
 """量最终车厢云的主体侧壁前后端长度，排除顶部篷布附加部分。"""
 
+from dataclasses import replace
+
 import numpy as np
 
 from carpointcloud_analyzer.domain.inner_faces import (
@@ -26,6 +28,66 @@ def _balanced_points(points):
     order = np.argsort(center_distance, kind='stable')
     _, indices = unique_cells(grid[order], return_index=True)
     return values[order[indices]]
+
+
+def _body_height_band(floor, top):
+    hlo = floor + BODY_FLOOR_CLEARANCE_M
+    return hlo, max(floor + BODY_TOP_FRACTION * (top - floor), min(top - .05, hlo + 4 * FACE_CELL_M))
+
+
+def _side_extent_stages(values, rear, front, hlo, hhi):
+    return (
+        ('body_height_band', (values[:, 2] >= hlo) & (values[:, 2] <= hhi)
+         & (values[:, 1] >= rear - FACE_SEARCH_HALF_BAND_M)
+         & (values[:, 1] <= front + FACE_SEARCH_HALF_BAND_M)),
+        ('top_view_between_end_walls', (values[:, 1] >= rear) & (values[:, 1] <= front)),
+    )
+
+
+def _near_side(values, face):
+    predicted = np.c_[values[:, 1:3], np.ones(len(values))] @ face.coefficients
+    return np.abs(values[:, 0] - predicted) <= 3 * FACE_TOLERANCE_M
+
+
+def _reaches_end_walls(side_rear, side_front, rear, front):
+    return side_rear <= rear + FACE_SEARCH_HALF_BAND_M and side_front >= front - FACE_SEARCH_HALF_BAND_M
+
+
+def select_rib_side_reference(measurement, observed, rear, front, floor, top, completion):
+    """在覆盖达标且到达两端的实测壁面上定位拉筋，完整侧优先。"""
+    seams = completion.get('cornerSeams', [])
+    patched = {seam['side'] for seam in seams if seam.get('synthesizedPoints', 0) > 0}
+    repaired = {seam['side'] for seam in seams
+                if seam.get('longGapHeightRows', 0) > 0}
+    mirror = completion.get('sideWall', {})
+    if mirror.get('repaired'):
+        repaired.add(mirror['side'])
+    # 覆盖只计分割出的实测侧壁，沿用选面的二维及纵向门槛。先查未补侧，
+    # 再查常规角缝、镜像或长桥所在侧；同级按原始覆盖排序。都量不到时保留原测线。
+    candidates = _side_candidates(observed, rear, front, floor, top)
+    def repair_priority(item):
+        side = 'left' if item[2] < 0 else 'right'
+        return side in repaired, side in patched
+
+    candidates.sort(key=repair_priority)
+    stages = _side_extent_stages(observed, rear, front, *_body_height_band(floor, top))
+    for coverage, length_coverage, sign, face in candidates:
+        near = _near_side(observed, face)
+        for stage, window in stages:
+            points = _balanced_points(observed[near & window])
+            if not len(points):
+                continue
+            side_rear, side_front = occupancy_extent(points[:, 1])
+            if _reaches_end_walls(side_rear, side_front, rear, front):
+                side = 'left' if sign < 0 else 'right'
+                if (side == measurement.metadata.get('selectedSide')
+                        and side not in repaired and side not in patched):
+                    return measurement
+                reference = dict(source='observed_side_wall', selectedSide=side,
+                                 sidePlane=face.coefficients.tolist(), sideCoverage=float(coverage),
+                                 sideLongitudinalCoverage=float(length_coverage), sideExtentStage=stage)
+                return replace(measurement, side_plane=tuple(face.coefficients), metadata=reference)
+    return measurement
 
 
 def measure_final_inner_end_faces(points, rear, front, floor, top,
@@ -71,9 +133,7 @@ def measure_final_inner_end_faces(points, rear, front, floor, top,
                              min_coverage=.20, min_length_coverage=.50)
     if not sides:
         return unavailable('inner_side_plane_unavailable')
-    hlo = floor + BODY_FLOOR_CLEARANCE_M
-    hhi = max(floor + BODY_TOP_FRACTION * (top - floor),
-              min(top - .05, hlo + 4 * FACE_CELL_M))
+    hlo, hhi = _body_height_band(floor, top)
     if hhi - hlo < MIN_COMMON_HEIGHT_M + .10:
         return unavailable('insufficient_body_height')
     # 侧别按原二维覆盖排序；原分割锚点只限定搜索区，不替代实测侧壁端点。
@@ -81,24 +141,16 @@ def measure_final_inner_end_faces(points, rear, front, floor, top,
     # 远端常只看到侧壁上部（或底板相对局部系倾斜），高度带内侧壁到不了
     # 端壁时，改在俯视中量侧壁全高占用，并截止于两道端壁：端壁之外的
     # 顶部篷布附加部分同样不计。
-    stages = (
-        ('body_height_band', (values[:, 2] >= hlo) & (values[:, 2] <= hhi)
-         & (values[:, 1] >= rear - FACE_SEARCH_HALF_BAND_M)
-         & (values[:, 1] <= front + FACE_SEARCH_HALF_BAND_M)),
-        ('top_view_between_end_walls', (values[:, 1] >= rear) & (values[:, 1] <= front)),
-    )
+    stages = _side_extent_stages(values, rear, front, hlo, hhi)
     short_of_end_walls = False
     for stage, window in stages:
         for coverage, longitudinal_coverage, sign, side_face in sides:
-            residual = np.abs(values[:, 0] - np.c_[values[:, 1:3], np.ones(len(values))]
-                              @ side_face.coefficients)
-            side = _balanced_points(values[(residual <= 3 * FACE_TOLERANCE_M) & window])
+            side = _balanced_points(values[_near_side(values, side_face) & window])
             if not len(side):
                 continue
             rear_l, front_l = occupancy_extent(side[:, 1])
             # 主体侧壁两端须到达两道端壁的搜索带，不能把较短的可见段当成内长。
-            if (rear_l > rear + FACE_SEARCH_HALF_BAND_M
-                    or front_l < front - FACE_SEARCH_HALF_BAND_M):
+            if not _reaches_end_walls(rear_l, front_l, rear, front):
                 short_of_end_walls = True
                 continue
             axis = None

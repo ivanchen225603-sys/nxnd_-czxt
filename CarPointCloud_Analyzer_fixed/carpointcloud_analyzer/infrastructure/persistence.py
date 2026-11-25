@@ -12,6 +12,7 @@ import importlib
 import json
 import logging
 import os
+from pathlib import Path
 
 from carpointcloud_analyzer.domain import stage_timing
 from carpointcloud_analyzer.domain.utils.environment import env_bool as _env_bool
@@ -22,7 +23,7 @@ from carpointcloud_analyzer.application.ports import (
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 
 _ONE_DECIMAL = Decimal("0.1")
@@ -107,22 +108,44 @@ class Dm8DimensionStore:
         self, payload: Mapping[str, Any], empty_profile: Mapping[str, Any] | None = None,
     ) -> PersistResult:
         """一次事务写主记录、明细和空车档案；数据库异常直接回滚并上抛。"""
+        return self._persist(payload, empty_profile, wait_for_plate=False)
+
+    def complete_pending_empty_profile(
+        self, payload: Mapping[str, Any], empty_profile: Mapping[str, Any],
+    ) -> PersistResult | Literal["pending", "unidentified"]:
+        return self._persist(payload, empty_profile, wait_for_plate=True)
+
+    def _persist(
+        self, payload: Mapping[str, Any], empty_profile: Mapping[str, Any] | None,
+        *, wait_for_plate: bool,
+    ) -> PersistResult | Literal["pending", "unidentified"]:
         record = _normalize_payload(payload)
         connection = self._connect()
         try:
             with stage_timing.stage("db-write-record"):
-                record = self._resolve_workflow_plate(connection, record)
+                arrival = self._read_workflow_plate(connection, record["workflowId"], lock=True)
+                plate = self._confirmed_plate(arrival)
+                if wait_for_plate and not plate:
+                    connection.rollback()
+                    if arrival and str(arrival[1] or "").upper() not in ("FAILED", "SUCCEEDED"):
+                        return "pending"
+                    return "unidentified"
+                if plate:
+                    record["licensePlate"] = plate
                 payload_hash = _payload_hash(record)
                 existing = self._find_existing(connection, record)
                 if existing is not None:
                     persisted = self._resolve_existing(existing, payload_hash, record)
                     record_id = persisted.record_id
+                    if plate:
+                        self._backfill_dimension_plate(connection, record_id, plate)
                 else:
                     record_id = self._insert_transaction(connection, record, payload_hash)
             profile_result = None
             if empty_profile is not None:
                 with stage_timing.stage("db-write-profile"):
-                    profile_result = self._upsert_empty_profile(connection, record_id, record, empty_profile)
+                    profile_result = self._upsert_empty_profile(
+                        connection, record_id, record, empty_profile, require_file=wait_for_plate)
             with stage_timing.stage("db-commit"):
                 connection.commit()
             return PersistResult(record_id, existing is None, record['idempotencyKey'], profile_result)
@@ -133,36 +156,6 @@ class Dm8DimensionStore:
         finally:
             with stage_timing.stage("db-close"):
                 connection.close()
-
-    def record_dimension_unavailable(
-        self, workflow_id: str, camera: str, captured_at: datetime,
-    ) -> bool:
-        """首次终局写在来车记录上，与正式尺寸的唯一键互不占用。"""
-        connection = self._connect()
-        cursor = connection.cursor()
-        try:
-            cursor.execute(
-                f"UPDATE {self._arrival_table} "
-                "SET DimensionUnavailableAt = ?, DimensionUnavailableCamera = ? "
-                "WHERE SessionId = ? AND DimensionUnavailableAt IS NULL",
-                _business_datetime(captured_at.isoformat()), camera, workflow_id,
-            )
-            if cursor.rowcount:
-                connection.commit()
-                return True
-            cursor.execute(
-                f"SELECT Id FROM {self._arrival_table} WHERE SessionId = ?",
-                workflow_id,
-            )
-            recorded = cursor.fetchone() is not None
-            connection.commit()
-            return recorded
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            cursor.close()
-            connection.close()
 
     def _connect(self):
         """创建关闭自动提交的 DM8 连接。"""
@@ -208,40 +201,50 @@ class Dm8DimensionStore:
         connection = self._connect()
         try:
             with stage_timing.stage("db-query-plate"):
-                resolved = self._resolve_workflow_plate(connection, {"workflowId": workflow_id})
-            plate = resolved.get("licensePlate")
-            return plate if plate and plate != "UNKNOWN" else None
+                return self._confirmed_plate(self._read_workflow_plate(connection, workflow_id))
         finally:
             with stage_timing.stage("db-close"):
                 connection.close()
 
-    def _resolve_workflow_plate(
-        self,
-        connection,
-        record: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """以 VehicleArrival 中已成功绑定的车牌覆盖异步分析载荷。"""
-        workflow_id = record.get("workflowId")
+    def _read_workflow_plate(self, connection, workflow_id: str | None, *, lock: bool = False):
+        """写入与 WebApi 识牌使用同一来车行锁，分析前的只读查询不拿锁。"""
         if not workflow_id:
-            return dict(record)
+            return None
 
         cursor = connection.cursor()
         try:
+            if lock:
+                cursor.execute(
+                    f"UPDATE {self._arrival_table} SET UpdatedAt = UpdatedAt WHERE SessionId = ?",
+                    workflow_id,
+                )
             cursor.execute(
                 f"SELECT LicensePlate, PlateStatus FROM {self._arrival_table} "
                 "WHERE SessionId = ?",
                 workflow_id,
             )
-            row = cursor.fetchone()
+            return cursor.fetchone()
         finally:
             cursor.close()
 
-        resolved = dict(record)
+    @staticmethod
+    def _confirmed_plate(row) -> str | None:
         if row and str(row[1] or "").upper() == "SUCCEEDED":
             plate = str(row[0] or "").strip().upper()
-            if plate:
-                resolved["licensePlate"] = plate
-        return resolved
+            if plate and plate != "UNKNOWN":
+                return plate
+        return None
+
+    def _backfill_dimension_plate(self, connection, record_id: int, plate: str) -> None:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                f"UPDATE {self._record_table} SET LicensePlate = ?, UpdatedAt = ? WHERE Id = ? "
+                "AND (LicensePlate IS NULL OR TRIM(LicensePlate) = '' OR UPPER(LicensePlate) = 'UNKNOWN')",
+                plate, datetime.now(), record_id,
+            )
+        finally:
+            cursor.close()
 
 
     @staticmethod
@@ -319,10 +322,15 @@ class Dm8DimensionStore:
         dimension_record_id: int,
         record: Mapping[str, Any],
         profile: Mapping[str, Any],
+        *, require_file: bool = False,
     ) -> dict[str, Any]:
         """仅以较新的成功空车扫描覆盖同车牌档案。"""
         cursor = connection.cursor()
         try:
+            cursor.execute(
+                f"UPDATE {self._empty_profile_table} SET UpdatedAt = UpdatedAt WHERE LicensePlate = ?",
+                record["licensePlate"],
+            )
             cursor.execute(
                 f"SELECT Id, PointCloudPath, ScanTime, WorkflowId FROM {self._empty_profile_table} "
                 "WHERE LicensePlate = ?",
@@ -335,10 +343,12 @@ class Dm8DimensionStore:
         previous_path = str(row[1]) if row and row[1] is not None else None
         previous_scan_time = row[2] if row and row[2] is not None else None
         previous_workflow = str(row[3]) if row and row[3] is not None else None
-        should_update = (row is None or previous_scan_time is None
-                         or profile["scanTime"] > previous_scan_time
-                         or (profile["scanTime"] == previous_scan_time
-                             and previous_workflow == record["workflowId"]))
+        scan_time = _business_datetime(profile["scanTime"])
+        should_update = previous_path != str(profile["pointCloudPath"]) and (
+            row is None or previous_scan_time is None or scan_time > previous_scan_time
+            or (scan_time == previous_scan_time and previous_workflow == record["workflowId"]))
+        if should_update and require_file and not Path(str(profile["pointCloudPath"])).is_file():
+            raise FileNotFoundError("待归档空车点云缺失")
         dimensions = record["dimensions"]
         now = datetime.now()
 
@@ -356,7 +366,7 @@ class Dm8DimensionStore:
                     record["pairId"], record["cameraIdentifier"],
                     profile["pointCloudPath"], profile["pointCloudSha256"],
                     profile["pointCloudSize"], profile["pointCount"],
-                    profile["scanTime"], dimensions["cabToTrailerFrontDist"],
+                    scan_time, dimensions["cabToTrailerFrontDist"],
                     dimensions["trailerLength"], dimensions["trailerWidth"],
                     dimensions["trailerBodyHeight"],
                     dimensions["trailerBottomToGroundHeight"],
@@ -378,12 +388,12 @@ class Dm8DimensionStore:
                     dimension_record_id, record["workflowId"], record["pairId"],
                     record["cameraIdentifier"], profile["pointCloudPath"],
                     profile["pointCloudSha256"], profile["pointCloudSize"],
-                    profile["pointCount"], profile["scanTime"],
+                    profile["pointCount"], scan_time,
                     dimensions["cabToTrailerFrontDist"], dimensions["trailerLength"],
                     dimensions["trailerWidth"], dimensions["trailerBodyHeight"],
                     dimensions["trailerBottomToGroundHeight"],
                     dimensions["highLowPlateHeight"], now, record["licensePlate"],
-                    profile["scanTime"], profile["scanTime"], record["workflowId"],
+                    scan_time, scan_time, record["workflowId"],
                 )
             finally:
                 cursor.close()
@@ -398,7 +408,7 @@ class Dm8DimensionStore:
             "pointCloudPath": current_path,
             "previousPointCloudPath": previous_path,
             "scanTime": (
-                profile["scanTime"] if should_update else previous_scan_time
+                scan_time if should_update else previous_scan_time
             ).isoformat(timespec="milliseconds"),
         }
 

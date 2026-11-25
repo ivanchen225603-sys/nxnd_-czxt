@@ -1,4 +1,5 @@
 using System.Net;
+using System.Globalization;
 using System.Text.Json;
 using CarPointCloudLadarWorker.Analysis;
 using CarPointCloudLadarWorker.Config;
@@ -74,7 +75,16 @@ public sealed class ControlApiServer(
         switch (method, path)
         {
             case ("POST", "/api/radars/scan-once"):
-                var start = sessions.Start(string.IsNullOrWhiteSpace(query["requestId"]) ? headers["Idempotency-Key"] : query["requestId"]);
+                DateTimeOffset? captureUntil = null;
+                if (query["captureUntil"] is { } value)
+                {
+                    if (!DateTimeOffset.TryParseExact(value, "O", CultureInfo.InvariantCulture, DateTimeStyles.None, out var until))
+                        return (new { success = false, message = "captureUntil 必须是带偏移的 ISO 时间" }, 400);
+                    captureUntil = until;
+                }
+                var start = sessions.Start(
+                    string.IsNullOrWhiteSpace(query["requestId"]) ? headers["Idempotency-Key"] : query["requestId"],
+                    captureUntil);
                 logger.LogInformation("scan-once 指令已处理 workflowId={WorkflowId} started={Started} idempotent={Idempotent} code={Code}",
                     start.Snapshot.RequestId, start.Started, start.Idempotent, start.Code);
                 return (ApiResponses.Command(start, cycle), ApiResponses.StartStatusCode(start));
@@ -82,6 +92,10 @@ public sealed class ControlApiServer(
             case ("POST", "/api/radars/scan-once/stop"):
                 var stop = sessions.Stop("人工停止单次扫描", query["requestId"]);
                 return (StopBody(stop, cycle), ApiResponses.StopStatusCode(stop));
+
+            case ("POST", "/api/radars/scan-once/passage-ended"):
+                var ended = sessions.EndPassage(query["requestId"] ?? "");
+                return (ApiResponses.Command(ended, cycle), ended.Success ? 200 : 400);
 
             case ("POST", "/api/radar/standby"):
                 return Standby(query, cycle);

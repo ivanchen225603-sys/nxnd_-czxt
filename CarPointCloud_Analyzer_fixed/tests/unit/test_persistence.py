@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from threading import Event, Lock, Thread
 
 import pytest
 
@@ -75,44 +76,9 @@ def test_preanalysis_workflow_plate_is_read_only_and_requires_confirmed_arrival(
     assert store.get_workflow_plate("ready") == "粤A64727"
     assert store.get_workflow_plate("pending") is None
     assert store.get_workflow_plate("missing") is None
+    assert not database.arrival_locks
     assert not database.records
     assert not database.profiles
-
-
-def test_dimension_unavailable_is_idempotent_and_does_not_claim_measurement_identity():
-    db = FakeDatabase()
-    store = _store(db)
-    at = datetime(2026, 11, 19, 10, 30)
-    workflow = "paired-001"
-    db.arrivals[workflow] = ("川A12047", "SUCCEEDED")
-    assert not store.record_dimension_unavailable("unknown-flow", "CAM_004", at)
-    assert store.record_dimension_unavailable(workflow, "CAM_004", at)
-    assert store.record_dimension_unavailable(workflow, "CAM_005", at.replace(minute=31))
-    assert db.unavailable_dimensions == {workflow: (at, "CAM_004")}
-    assert not db.records
-
-    measurement = _empty_scan(workflow, at)
-    assert store.persist_vehicle_dimensions(measurement).inserted
-    assert store.record_dimension_unavailable(workflow, "CAM_004", at)
-    assert not store.persist_vehicle_dimensions(measurement).inserted
-
-
-def test_pair_unavailable_http_records_the_capture_without_calculating():
-    from fastapi.testclient import TestClient
-    from carpointcloud_analyzer.composition import create_app
-
-    db = FakeDatabase()
-    db.arrivals["paired-http"] = ("川A12047", "SUCCEEDED")
-    app = create_app(dimension_store=_store(db))
-    with TestClient(app) as client:
-        response = client.post("/analyze-pair/unavailable", json={
-            "workflowId": "paired-http", "cameraA": "CAM_004",
-            "capturedAt": "2026-11-19T10:30:00",
-        })
-    assert response.status_code == 200
-    assert response.json() == {"status": "recorded"}
-    assert db.unavailable_dimensions == {"paired-http": (datetime(2026, 11, 19, 10, 30), "CAM_004")}
-    assert not db.records
 
 
 def test_same_workflow_equal_scan_time_profile_retry_is_idempotent(tmp_path):
@@ -146,7 +112,7 @@ def test_old_workflow_equal_scan_time_cannot_replace_already_committed_workflow(
     assert late.empty_vehicle_profile["updated"] is False
     assert late.empty_vehicle_profile["pointCloudPath"] == str((tmp_path / "newer.pcd").resolve())
     assert len(db.records) == 2
-    assert db.record_plates[old_result.record_id] == "UNKNOWN"
+    assert db.record_plates[old_result.record_id] == "川A12047"
     assert db.profiles["川A12047"][3:] == (new_result.record_id, newer["workflowId"])
 
 
@@ -215,7 +181,6 @@ class FakeDatabase:
         self.records = {}
         self.record_plates = {}
         self.arrivals = {}
-        self.unavailable_dimensions = {}
         self.profiles = {}
         self.details = []
         self.next_id = 1
@@ -239,7 +204,6 @@ class FakeConnection:
             deepcopy(database.records),
             deepcopy(database.record_plates),
             deepcopy(database.profiles),
-            deepcopy(database.unavailable_dimensions),
             list(database.details),
         )
         self.committed = False
@@ -256,7 +220,6 @@ class FakeConnection:
             self.database.records,
             self.database.record_plates,
             self.database.profiles,
-            self.database.unavailable_dimensions,
             self.database.details,
         ) = deepcopy(self.snapshot)
 
@@ -295,15 +258,6 @@ class FakeCursor:
             self.database.arrival_locks.append(params[0])
             self.database.arrival_events.append(("lock", params[0]))
             self.rowcount = 1 if params[0] in self.database.arrivals else 0
-        elif normalized.startswith("UPDATE VEHICLEARRIVAL SET DIMENSIONUNAVAILABLEAT"):
-            captured_at, camera, workflow = params
-            self.rowcount = int(
-                workflow in self.database.arrivals and workflow not in self.database.unavailable_dimensions
-            )
-            if self.rowcount:
-                self.database.unavailable_dimensions[workflow] = (captured_at, camera)
-        elif normalized.startswith("SELECT ID FROM VEHICLEARRIVAL WHERE SESSIONID"):
-            self.row = (1,) if params[0] in self.database.arrivals else None
         elif normalized.startswith("SELECT ID, POINTCLOUDPATH, SCANTIME"):
             self.database.profile_events.append(('read', params[0]))
             profile = self.database.profiles.get(params[0])
@@ -456,8 +410,67 @@ def test_dm8_store_uses_succeeded_arrival_plate_as_workflow_authority():
 
     assert result.inserted is True
     assert database.record_plates[result.record_id] == "粤A64727"
-    assert database.arrival_locks == []
-    assert database.arrival_events == [("read", "workflow-authority")]
+    assert database.arrival_locks == ["workflow-authority"]
+    assert database.arrival_events == [("lock", "workflow-authority"), ("read", "workflow-authority")]
+
+
+def test_plate_commit_cannot_backfill_between_pending_read_and_dimension_insert():
+    workflow = "interleaved-arrival"
+    database = FakeDatabase()
+    database.arrivals[workflow] = (None, "PENDING")
+    arrival_lock = Lock()
+    plate_writing, plate_finished = Event(), Event()
+
+    class Cursor(FakeCursor):
+        def execute(self, sql, *params):
+            if sql.startswith("UPDATE VehicleArrival SET UpdatedAt = UpdatedAt"):
+                arrival_lock.acquire()
+                connection.holds_arrival = True
+            result = super().execute(sql, *params)
+            if sql.startswith("SELECT LicensePlate, PlateStatus FROM VehicleArrival"):
+                plate_writing.set()
+                if not connection.holds_arrival:
+                    # 原代码未取行锁，强制让识牌先完成回填，复现当时找不到尺寸行。
+                    assert plate_finished.wait(2)
+            return result
+
+    class Connection(FakeConnection):
+        holds_arrival = False
+
+        def cursor(self):
+            return Cursor(self.database)
+
+        def commit(self):
+            super().commit()
+            if self.holds_arrival:
+                self.holds_arrival = False
+                arrival_lock.release()
+
+        def close(self):
+            if self.holds_arrival:
+                arrival_lock.release()
+            super().close()
+
+    def bind_plate():
+        if plate_writing.wait(2):
+            with arrival_lock:
+                database.arrivals[workflow] = ("粤A64727", "SUCCEEDED")
+                for record_id, plate in database.record_plates.items():
+                    if plate == "UNKNOWN":
+                        database.record_plates[record_id] = "粤A64727"
+            plate_finished.set()
+
+    connection = Connection(database)
+    settings = Dm8Settings(enabled=True)
+    store = Dm8DimensionStore(settings, connect=lambda **kwargs: connection)
+    plate_task = Thread(target=bind_plate)
+    plate_task.start()
+    try:
+        result = store.persist_vehicle_dimensions(_payload() | {"workflowId": workflow, "licensePlate": "UNKNOWN"})
+        assert plate_finished.wait(2)
+        assert database.record_plates[result.record_id] == "粤A64727"
+    finally:
+        plate_task.join(2)
 
 
 
@@ -532,7 +545,7 @@ def test_dm8_store_keeps_every_scan_but_upserts_one_latest_profile_per_plate(tmp
 
     assert len(database.records) == 2
     assert len(database.profiles) == 1
-    assert database.profile_events == [('read', '川A12047')] * 2
+    assert database.profile_events == [('lock', '川A12047'), ('read', '川A12047')] * 2
     profile = database.profiles["川A12047"]
     assert profile[1] == str(second_path.resolve())
     assert profile[3] == second.record_id

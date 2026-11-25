@@ -1127,7 +1127,7 @@ class TestVolumePoseRegistration(_CarriageScene, unittest.TestCase):
 
 class TestVolumeCrossCheck(_CarriageScene, unittest.TestCase):
     """逐车交叉校核（2026-10-01）：只用这一车两次扫描的相对高度另算一遍体积，
-    抓主算法特有的粗错（配准没配上、积分范围圈错）。超 10% 只标"需复核"，不改体积。"""
+    超出参考值时提示差异，交付主算法体积。"""
 
     def test_flat_load_matches_the_truth(self):
         """煤厚 1 m、内宽 2.4 m、内长 10 m 的合成车厢：校核值约 24 m^3。
@@ -1141,16 +1141,21 @@ class TestVolumeCrossCheck(_CarriageScene, unittest.TestCase):
         self.assertLess(abs(cc.volume_m3 - self.W * self.L * self.H) / (self.W * self.L * self.H), 0.02,
                         f"{cc.volume_m3:.2f}（{cc.reason}）")
 
-    def test_flags_a_misaligned_main_result(self):
-        """★ 横向错开 0.30 m 又不让主算法对齐（旧口径）：主算法多算，交叉校核不跟着错 -> 标"需复核"。"""
-        from app.detect import compute_volume_auto
+    def test_reports_cross_check_difference_for_a_misaligned_main_result(self):
+        """横向错开 0.30 m：超出参考值时输出诊断，恢复对齐后差异回到参考范围。"""
+        from app.detect import CROSS_CHECK_MAX_DIFF, compute_volume_auto
         base, lr = self._baseline(), self._loaded(xc=-0.30)
         old = compute_volume_auto(base, lr, dy=0.0, dx=0.0, pose=False, inner=False)
-        self.assertGreater(old.volume_m3, old.cross_check.volume_m3 * 1.10, "前提：旧口径确实多算 10% 以上")
-        self.assertIn("需复核", old.text)
+        self.assertTrue(old.ok, old.text)
+        old_difference = old.volume_m3 / old.cross_check.volume_m3 - 1
+        self.assertGreater(old_difference, CROSS_CHECK_MAX_DIFF)
+        self.assertIn(f"诊断：与交叉校核相差 {old_difference:+.1%}", old.text)
+        self.assertIn(f"参考值 ±{CROSS_CHECK_MAX_DIFF:.0%}", old.text)
         new = compute_volume_auto(base, lr, dy=0.0)
+        self.assertTrue(new.ok, new.text)
+        self.assertLessEqual(abs(new.volume_m3 / new.cross_check.volume_m3 - 1), CROSS_CHECK_MAX_DIFF)
         self.assertIn("交叉校核", new.text)
-        self.assertNotIn("需复核", new.text)
+        self.assertNotIn("诊断：与交叉校核相差", new.text)
 
     def test_unaffected_by_sag(self):
         """载货车整体低 5 cm（满载下沉）：校核是相对本车壁顶算的，不跟着变。"""

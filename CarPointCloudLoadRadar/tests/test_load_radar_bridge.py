@@ -37,6 +37,12 @@ class MemoryClient:
     def get_measurement(self, measurement):
         return self.rows[measurement]
 
+    def report_standstill(self, payload):
+        return {"status": "not_required", "passageId": payload["passageId"]}
+
+    def report_departure(self, payload):
+        return {"status": "not_required", "passageId": payload["passageId"]}
+
     def list_baselines(self):
         return self.versions
 

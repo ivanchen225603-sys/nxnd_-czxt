@@ -101,6 +101,9 @@ def rib_projections(ribs: list[RibInfo], measurement: LongitudinalMeasurement) -
         rows = measurement.rib_side_projections
         if not isinstance(rows, list):
             rows = []
+        reference = measurement.metadata.get('ribSideReference')
+        expected_side = (reference or measurement.metadata).get('selectedSide')
+        expected_plane = _vector3(reference.get('sidePlane') if reference else measurement.side_plane)
         result = []
         for rib in ribs:
             matches = [row for row in rows if isinstance(row, dict) and row.get('ribId') == rib.rib_id]
@@ -134,9 +137,8 @@ def rib_projections(ribs: list[RibInfo], measurement: LongitudinalMeasurement) -
             if row.get('valid'):
                 plane = _vector3(row.get('referencePlaneWLH'))
                 intersection = _vector3(row.get('intersectionWLH'))
-                if (row.get('selectedSide') != measurement.metadata.get('selectedSide')
-                        or plane is None
-                        or not np.allclose(plane, measurement.side_plane, atol=1e-9, rtol=0)
+                if (row.get('selectedSide') != expected_side or expected_plane is None
+                        or plane is None or not np.allclose(plane, expected_plane, atol=1e-9, rtol=0)
                         or intersection is None
                         or abs(measurement.project_longitudinal(intersection) - position) > 1e-9
                         or abs(intersection[0] - np.r_[intersection[1:], 1.] @ plane) > 1e-8):

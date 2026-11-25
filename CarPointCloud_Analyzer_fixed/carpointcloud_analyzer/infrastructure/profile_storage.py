@@ -3,10 +3,13 @@
 from carpointcloud_analyzer.application.ports import (
     StagedEmptyVehicleProfile as StagedEmptyVehicleProfile,
     DisabledEmptyVehicleProfileStorage as DisabledEmptyVehicleProfileStorage,
+    PendingEmptyVehicleProfile, PersistResult,
 )
 
 
 import hashlib
+import json
+import logging
 import os
 import shutil
 
@@ -19,6 +22,7 @@ from uuid import uuid4
 
 
 _INVALID_FILE_CHARS = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff_-]+")
+logger = logging.getLogger(__name__)
 
 
 class EmptyVehicleProfileStorage:
@@ -30,6 +34,7 @@ class EmptyVehicleProfileStorage:
         """创建永久档案目录。"""
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._pending_dir = self.root / ".pending-plates"
 
     @classmethod
     def from_env(cls) -> "EmptyVehicleProfileStorage | DisabledEmptyVehicleProfileStorage":
@@ -55,8 +60,12 @@ class EmptyVehicleProfileStorage:
         plate = license_plate.strip().upper()
         safe_plate = _INVALID_FILE_CHARS.sub("_", plate).strip("_")[:24] or "plate"
         plate_digest = hashlib.sha256(plate.encode("utf-8")).hexdigest()[:16]
+        return self._stage_candidate(source_pcd, self.root / f"{safe_plate}_{plate_digest}",
+                                     stable_scan_id, point_count, scan_time)
+
+    @staticmethod
+    def _stage_candidate(source_pcd, target_dir, stable_scan_id, point_count, scan_time):
         scan_digest = hashlib.sha256(stable_scan_id.encode("utf-8")).hexdigest()[:24]
-        target_dir = self.root / f"{safe_plate}_{plate_digest}"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{scan_digest}_{uuid4().hex}_fused_empty.pcd"
         shutil.copyfile(source_pcd, target)
@@ -69,6 +78,56 @@ class EmptyVehicleProfileStorage:
             point_count=int(point_count),
             scan_time=scan_time,
         )
+
+    def defer(self, source_pcd: str | Path, payload: Mapping[str, Any],
+              point_count: int, scan_time: datetime) -> None:
+        """先保存完整净化点云，再原子发布同一 workflow 的待办。"""
+        workflow_id = str(payload["workflowId"])
+        key = hashlib.sha256(workflow_id.encode("utf-8")).hexdigest()
+        self._pending_dir.mkdir(exist_ok=True)
+        receipt = self._pending_dir / f"{key}.json"
+        if receipt.exists():
+            return
+        profile = self._stage_candidate(source_pcd, self.root / "late-plates" / key,
+                                        workflow_id, point_count, scan_time)
+        mapping = profile.to_mapping()
+        mapping["scanTime"] = scan_time.isoformat()
+        temp = receipt.with_suffix(f".{uuid4().hex}.tmp")
+        try:
+            temp.write_text(json.dumps({"payload": dict(payload), "profile": mapping},
+                                       ensure_ascii=False, allow_nan=False), encoding="utf-8")
+            os.link(temp, receipt)
+        except FileExistsError:
+            self._delete_if_managed(profile.point_cloud_path)
+        except Exception:
+            self._delete_if_managed(profile.point_cloud_path)
+            raise
+        finally:
+            temp.unlink(missing_ok=True)
+
+    def pending(self):
+        for receipt in sorted(self._pending_dir.glob("*.json")):
+            try:
+                data = json.loads(receipt.read_text(encoding="utf-8"))
+                profile = data["profile"]
+                yield PendingEmptyVehicleProfile(receipt, data["payload"], StagedEmptyVehicleProfile(
+                    point_cloud_path=profile["pointCloudPath"],
+                    point_cloud_sha256=profile["pointCloudSha256"],
+                    point_cloud_size=profile["pointCloudSize"],
+                    point_count=profile["pointCount"],
+                    scan_time=datetime.fromisoformat(profile["scanTime"]),
+                ))
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError, KeyError, TypeError):
+                logger.exception("无法读取迟到车牌的空车归档待办 path=%s", receipt)
+
+    def finish_pending(self, job: PendingEmptyVehicleProfile, result: PersistResult | None) -> None:
+        if result is None:
+            self._delete_if_managed(job.profile.point_cloud_path)
+        else:
+            self.finalize(job.profile.point_cloud_path, result.to_dict())
+        job.receipt_path.unlink(missing_ok=True)
 
     def finalize(
         self,

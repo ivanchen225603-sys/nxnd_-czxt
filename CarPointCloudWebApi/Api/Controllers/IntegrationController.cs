@@ -148,6 +148,10 @@ public class IntegrationController : ControllerBase
         {
             return StatusCode(StatusCodes.Status502BadGateway, ApiResponse<object>.Fail(502, "乙方车牌服务暂时不可用"));
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, ApiResponse<object>.Fail(502, "乙方车牌服务调用超时"));
+        }
         catch (JsonException)
         {
             return StatusCode(StatusCodes.Status502BadGateway, ApiResponse<object>.Fail(502, "乙方车牌服务响应格式错误"));

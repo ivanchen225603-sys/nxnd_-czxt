@@ -1,5 +1,6 @@
 using CarPointCloudLadarWorker.Capture;
 using Ladarclr;
+using Microsoft.Extensions.Logging;
 
 namespace CarPointCloudLadarWorker.Tests;
 
@@ -65,6 +66,7 @@ public sealed class CaptureFilesTests
         var fresh = File("CAM_004_b.pcd", DateTime.Now);
         var fusedEmpty = File("x_fused_empty.pcd", old);
         var profile = File("p.pcd", old, profiles);
+        var log = new CleanupLog();
         var worker = new CaptureCleanupWorker(
             Microsoft.Extensions.Options.Options.Create(TestSupport.Options(o =>
             {
@@ -72,7 +74,7 @@ public sealed class CaptureFilesTests
                 o.PermanentPointCloudDirectories = [profiles];
             })),
             TimeProvider.System,
-            NullLogger<CaptureCleanupWorker>.Instance);
+            log);
 
         worker.DeleteOlderThan(DateTime.Now.AddDays(-1));
 
@@ -81,5 +83,19 @@ public sealed class CaptureFilesTests
         Assert.True(System.IO.File.Exists(fresh));
         Assert.True(System.IO.File.Exists(fusedEmpty));
         Assert.True(System.IO.File.Exists(profile));
+        Assert.Contains(log.Messages, message => message.Contains("已删除过期 PCD") && message.Contains("CAM_004_a.pcd"));
+        Assert.Contains(log.Messages, message => message.Contains("deletedPcd=1 deletedArtifacts=1 pcdBytes=1 keptRecent=1 keptProtected=2 failures=0"));
+        log.Messages.Clear();
+        worker.DeleteOlderThan(DateTime.Now.AddDays(-1));
+        Assert.Contains(log.Messages, message => message.Contains("deletedPcd=0 deletedArtifacts=0"));
+    }
+
+    private sealed class CleanupLog : ILogger<CaptureCleanupWorker>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 }

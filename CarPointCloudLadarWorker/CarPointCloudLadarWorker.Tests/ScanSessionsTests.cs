@@ -141,6 +141,47 @@ public sealed class ScanSessionsTests
         Assert.Null(Frame(sessions, "CAM_004"));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MissingSecondRadarCannotConsumeNextVehicleFrame(bool receivesDeparture)
+    {
+        var sessions = Create();
+        var stop = _time.GetUtcNow();
+        Assert.True(sessions.Start("first", stop.AddSeconds(10)).Started);
+        Assert.Null(Frame(sessions, "CAM_004"));
+        Assert.Equal("first", Frame(sessions, "CAM_004"));
+        _time.AdvanceSeconds(1);
+        if (receivesDeparture)
+            Assert.Equal("cancelled", sessions.EndPassage("first").Code);
+        Assert.Null(Frame(sessions, "CAM_005", afterSeconds: 2));
+        Assert.Equal(receivesDeparture ? ScanOutcome.Cancelled : ScanOutcome.TimedOut,
+            sessions.Find("first")!.Outcome);
+        Assert.Equal(["CAM_004"], sessions.Find("first")!.CapturedCameras);
+
+        _time.AdvanceSeconds(9);
+        Assert.True(sessions.Start("second", _time.GetUtcNow().AddSeconds(10)).Started);
+        Assert.Equal("already_closed", sessions.EndPassage("first").Code);
+        Assert.Null(Frame(sessions, "CAM_004"));
+        Assert.Null(Frame(sessions, "CAM_005", afterSeconds: 0));
+        Assert.Equal("second", Frame(sessions, "CAM_004"));
+        Assert.Equal("second", Frame(sessions, "CAM_005", afterSeconds: 0));
+        Assert.Equal(ScanOutcome.Completed, sessions.Find("second")!.Outcome);
+    }
+
+    [Fact]
+    public void EarlyDepartureAndExpiredCommandCannotOpenAnOldWorkflow()
+    {
+        var sessions = Create();
+        var now = _time.GetUtcNow();
+        Assert.Equal("cancelled", sessions.EndPassage("first").Code);
+        Assert.Equal("vehicle_departed", sessions.Start("first", now.AddSeconds(10)).Code);
+        Assert.Equal("capture_window_closed", sessions.Start("another", now).Code);
+        Assert.True(sessions.Start("present", now.AddSeconds(10)).Started);
+        Assert.Equal("already_closed", sessions.EndPassage("first").Code);
+        Assert.Equal("present", sessions.Snapshot().RequestId);
+    }
+
     [Fact]
     public void MarkPersisted_CompletesPersistenceAndFindReturnsEarlierSessions()
     {

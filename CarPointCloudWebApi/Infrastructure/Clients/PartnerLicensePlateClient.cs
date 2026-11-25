@@ -1,6 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
 namespace CarPointCloudWebApi.Infrastructure;
@@ -17,7 +18,6 @@ public class PartnerLicensePlateClient(
     IHttpContextAccessor httpContextAccessor)
 {
     private const int MaxAttempts = 3;
-    private static readonly Regex CameraIdentifierRegex = new("^[A-Za-z0-9_]{1,32}$", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>
@@ -26,7 +26,7 @@ public class PartnerLicensePlateClient(
     /// </summary>
     public async Task<List<PartnerLicensePlateData>> GetLicensePlateAsync(string cameraIdentifier, CancellationToken cancellationToken = default)
     {
-        if (!CameraIdentifierRegex.IsMatch(cameraIdentifier ?? string.Empty))
+        if (!PartnerContract.IsCamera(cameraIdentifier))
             throw new ArgumentException("cameraIdentifier 格式非法，要求 1-32 位字母、数字或下划线");
         var settings = options.Value;
         if (!settings.ExternalPartnerEnabled)
@@ -49,7 +49,7 @@ public class PartnerLicensePlateClient(
                 }
                 lastError = new InvalidOperationException("乙方车牌接口返回空数组");
             }
-            catch (Exception ex) when (attempt < MaxAttempts && !cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 lastError = ex;
             }
@@ -66,19 +66,26 @@ public class PartnerLicensePlateClient(
         string cameraIdentifier, string? workflowId, string interactionId, int attempt, CancellationToken cancellationToken)
     {
         var settings = options.Value;
+        if (!PartnerContract.IsCamera(cameraIdentifier))
+            throw new ArgumentException("cameraIdentifier 格式非法，要求 1-32 位字母、数字或下划线");
+        if (!settings.ExternalPartnerEnabled)
+            throw new InvalidOperationException("合作方接入已关闭");
         var uri = new Uri(new Uri(settings.PartnerBaseUrl.TrimEnd('/') + "/"),
             $"{settings.LicensePlatePath.TrimStart('/')}?cameraIdentifier={Uri.EscapeDataString(cameraIdentifier)}");
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri) { Content = new ByteArrayContent([]) };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
         request.Headers.Add("Timestamp", timestamp);
         request.Headers.Add("Signature", ApiSignatureHelper.GenerateSignature(timestamp, settings.AppSecret));
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(settings.PartnerTimeoutMs);
+        timeout.CancelAfter(Math.Clamp(settings.PartnerTimeoutMs, 1, 3000));
+        var requestedAt = BusinessClock.Now;
         var stopwatch = Stopwatch.StartNew();
         var httpStatus = 599;
         string? body = null;
         PartnerLicensePlateResponse? parsed = null;
+        List<PartnerLicensePlateData>? candidates = null;
         Exception? error = null;
         try
         {
@@ -86,10 +93,14 @@ public class PartnerLicensePlateClient(
             httpStatus = (int)response.StatusCode;
             body = await response.Content.ReadAsStringAsync(timeout.Token);
             response.EnsureSuccessStatusCode();
-            parsed = JsonSerializer.Deserialize<PartnerLicensePlateResponse>(body, Json)!;
-            if (parsed.Code != 200 || parsed.Data is null)
-                throw new InvalidOperationException($"乙方车牌接口返回失败: code={parsed.Code}");
-            return parsed.Data;
+            parsed = JsonSerializer.Deserialize<PartnerLicensePlateResponse>(body, Json);
+            if (parsed?.Code != 200 || parsed.Data is null)
+                throw new InvalidOperationException($"乙方车牌接口返回失败: code={parsed?.Code}");
+            candidates = parsed.Data.Where(item => item is not null && item.CameraId == cameraIdentifier &&
+                PartnerContract.IsLicensePlate(item.LicensePlate) &&
+                PartnerContract.TryParseTime(item.CaptureTime, out _) &&
+                !string.IsNullOrWhiteSpace(item.EnterId)).ToList();
+            return candidates;
         }
         catch (Exception ex)
         {
@@ -98,19 +109,34 @@ public class PartnerLicensePlateClient(
         }
         finally
         {
+            var receivedAt = BusinessClock.Now;
+            var elapsedMs = (int)stopwatch.ElapsedMilliseconds;
+            var responseBody = AuditBodySanitizer.Sanitize(body);
+            var maxBodyChars = Math.Clamp(configuration.GetValue("AuditLog:MaxBodyChars", 1024 * 1024), 1024, 1024 * 1024);
+            var truncated = responseBody?.Length > maxBodyChars;
+            if (truncated)
+                responseBody = responseBody![..maxBodyChars];
+            logger.LogInformation(
+                "乙方车牌响应 camera={CameraIdentifier} workflowId={WorkflowId} interactionId={InteractionId} attempt={Attempt} " +
+                "requestedAt={RequestedAt:yyyy-MM-dd HH:mm:ss.fff} receivedAt={ReceivedAt:yyyy-MM-dd HH:mm:ss.fff} " +
+                "elapsedMs={ElapsedMs} httpStatus={HttpStatus} businessCode={BusinessCode} candidateCount={CandidateCount} " +
+                "errorType={ErrorType} truncated={Truncated} response={Response}",
+                cameraIdentifier, workflowId, interactionId, attempt, requestedAt, receivedAt, elapsedMs, httpStatus,
+                parsed?.Code, candidates?.Count, error?.GetType().Name, truncated, responseBody);
             await WriteAuditAsync(new ApiAccessLogRecord
             {
                 RecordKind = "Access",
                 LogLevel = error is null ? "info" : "warn",
                 LifecycleStage = error is null ? "PartnerResponseReceived" : "PartnerAttemptFailed",
-                LogMessage = $"第 {attempt} 次乙方车牌接口调用{(error is null ? "完成" : "失败")}，HTTP {httpStatus}，耗时 {stopwatch.ElapsedMilliseconds} ms",
+                LogMessage = $"第 {attempt} 次乙方车牌调用，HTTP {httpStatus}，有效候选 {candidates?.Count ?? 0}，耗时 {elapsedMs} ms"
+                    + (truncated ? "，响应已截断" : ""),
                 InteractionId = interactionId,
                 IntegrationType = "LicensePlate",
                 Direction = "Outbound",
                 CallerSystem = "WebApi",
                 TargetSystem = "Partner",
                 WorkflowId = workflowId ?? httpContextAccessor.HttpContext?.Request.Headers["X-Workflow-Id"].FirstOrDefault(),
-                LicensePlate = parsed?.Data?.FirstOrDefault()?.LicensePlate,
+                LicensePlate = candidates is [var candidate] ? candidate.LicensePlate : null,
                 CameraIdentifier = cameraIdentifier,
                 AttemptNo = attempt,
                 HttpMethod = "GET",
@@ -119,12 +145,12 @@ public class PartnerLicensePlateClient(
                 Scheme = uri.Scheme,
                 Host = uri.IsDefaultPort ? uri.Host : uri.Authority,
                 TimestampHeader = timestamp,
-                ResponseBody = configuration.GetValue("AuditLog:CaptureBodies", false) ? AuditBodySanitizer.Sanitize(body) : null,
+                ResponseBody = responseBody,
                 HttpStatus = httpStatus,
                 BusinessCode = parsed?.Code ?? 0,
-                ElapsedMs = (int)stopwatch.ElapsedMilliseconds,
+                ElapsedMs = elapsedMs,
                 ErrorMessage = error?.Message,
-                CreatedAt = BusinessClock.Now
+                CreatedAt = receivedAt
             });
         }
     }

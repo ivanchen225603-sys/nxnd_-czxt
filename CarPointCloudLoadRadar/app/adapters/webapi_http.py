@@ -37,6 +37,9 @@ class HttpClient:
         """CH4 位置停稳通知；是否派发双雷达由 WebApi 按配置和车次状态决定。"""
         return self._dictionary(self._call("POST", "/passages/standstill", _json_bytes(payload), "application/json"))
 
+    def report_departure(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._dictionary(self._call("POST", "/passages/departure", _json_bytes(payload), "application/json"))
+
     def get_measurement(self, measurement_id: str) -> Dict[str, Any]:
         return self._dictionary(self._call("GET", "/measurements/" + parse.quote(_identifier(measurement_id), safe="")))
 

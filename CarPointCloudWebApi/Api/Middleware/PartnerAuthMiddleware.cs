@@ -4,8 +4,8 @@ using Microsoft.Extensions.Options;
 namespace CarPointCloudWebApi.Api;
 
 /// <summary>
-/// 合作方接口签名：请求头 Timestamp 为 Unix 毫秒时间，与服务器相差不超过 TimestampToleranceSeconds（最多 60 秒）；
-/// Signature 为小写 MD5(Timestamp + AppSecret)。
+/// 合作方接口签名：Timestamp 为 Unix 毫秒，Signature 为小写 MD5(Timestamp + AppSecret)。
+/// 煤量和车辆尺寸 GET 查询不检查客户端与服务器的时钟偏差。
 /// </summary>
 public class PartnerAuthMiddleware(RequestDelegate next, IOptions<IntegrationOptions> options, ILogger<PartnerAuthMiddleware> logger)
 {
@@ -30,11 +30,14 @@ public class PartnerAuthMiddleware(RequestDelegate next, IOptions<IntegrationOpt
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var tolerance = Math.Min(options.Value.TimestampToleranceSeconds, 60) * 1000L;
         var canonical = PartnerResponseFactory.IsPartnerQueryPath(context.Request.Path);
+        var isQuery = HttpMethods.IsGet(context.Request.Method) &&
+            PartnerResponseFactory.IsPartnerQuery(context.Request.Path);
         var error = !hasTimestamp || !hasSignature ? "缺少 Timestamp 或 Signature"
             : !long.TryParse(timestamp, out var timestampMs) ||
-              (canonical && (timestampValues.Count != 1 || timestamp != timestampMs.ToString(CultureInfo.InvariantCulture)))
+              (canonical && (timestampValues.Count != 1 || timestamp != timestampMs.ToString(CultureInfo.InvariantCulture))) ||
+              (isQuery && (timestamp.Length != 13 || timestampMs <= 0))
                 ? "Timestamp 格式非法"
-            : timestampMs < now - tolerance || timestampMs > now + tolerance ? "Timestamp 已过期"
+            : !isQuery && (timestampMs < now - tolerance || timestampMs > now + tolerance) ? "Timestamp 已过期"
             : signature != ApiSignatureHelper.GenerateSignature(timestamp, options.Value.AppSecret) ? "Signature 不匹配"
             : null;
         if (error is not null)

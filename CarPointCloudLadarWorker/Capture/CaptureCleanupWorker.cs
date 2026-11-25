@@ -20,9 +20,14 @@ public sealed class CaptureCleanupWorker(
     {
         var daily = _options.CaptureCleanupDailyAt.Length > 0;
         if (!daily && _options.CaptureRetentionHours <= 0)
+        {
+            logger.LogInformation("采集点云清理未启用: root={Root}", _options.CaptureDirectory);
             return;
+        }
 
         var dailyAt = daily ? TimeOnly.ParseExact(_options.CaptureCleanupDailyAt, "HH:mm", CultureInfo.InvariantCulture) : default;
+        logger.LogInformation("采集点云清理已启用: root={Root} dailyAt={DailyAt} retentionHours={RetentionHours} timezone={Timezone}",
+            _options.CaptureDirectory, _options.CaptureCleanupDailyAt, _options.CaptureRetentionHours, time.LocalTimeZone.Id);
         DateTime? lastDailyCutoff = null;
         using var timer = new PeriodicTimer(
             TimeSpan.FromMinutes(daily ? 1 : _options.CaptureCleanupIntervalMinutes), time);
@@ -46,36 +51,73 @@ public sealed class CaptureCleanupWorker(
 
     internal void DeleteOlderThan(DateTime cutoff)
     {
-        if (!Directory.Exists(_options.CaptureDirectory))
+        var root = _options.CaptureDirectory;
+        var runId = Guid.NewGuid().ToString("N");
+        logger.LogInformation("采集点云清理开始: runId={RunId} root={Root} cutoff={Cutoff:yyyy-MM-dd HH:mm:ss}",
+            runId, root, cutoff);
+        if (!Directory.Exists(root))
+        {
+            logger.LogWarning("采集点云清理跳过: runId={RunId} root={Root} reason=directory_missing", runId, root);
             return;
+        }
 
         var keep = _options.PermanentPointCloudDirectories
             .Select(x => Path.TrimEndingDirectorySeparator(Path.GetFullPath(x)) + Path.DirectorySeparatorChar)
             .ToArray();
         var deleted = 0;
-        foreach (var file in new DirectoryInfo(_options.CaptureDirectory).EnumerateFiles("*.pcd", SearchOption.AllDirectories))
+        var artifactsDeleted = 0;
+        var recent = 0;
+        var protectedFiles = 0;
+        var failed = 0;
+        long deletedBytes = 0;
+        try
         {
-            if (file.LastWriteTime >= cutoff ||
-                file.Name.EndsWith("_fused_empty.pcd", StringComparison.OrdinalIgnoreCase) ||
-                keep.Any(root => file.FullName.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
-                continue;
+            foreach (var file in new DirectoryInfo(root).EnumerateFiles("*.pcd", SearchOption.AllDirectories))
+            {
+                if (file.Name.EndsWith("_fused_empty.pcd", StringComparison.OrdinalIgnoreCase) ||
+                    keep.Any(directory => file.FullName.StartsWith(directory, StringComparison.OrdinalIgnoreCase)))
+                {
+                    protectedFiles++;
+                    continue;
+                }
+                var modifiedAt = file.LastWriteTime;
+                if (modifiedAt >= cutoff)
+                {
+                    recent++;
+                    continue;
+                }
 
-            var stem = Path.GetFileNameWithoutExtension(file.Name);
-            try
-            {
-                file.Delete();
-                foreach (var pattern in new[] { $"{stem}_rib_coords_*.json", $"{stem}_ribs_*.png" })
-                    foreach (var artifact in file.Directory!.EnumerateFiles(pattern))
-                        artifact.Delete();
-                deleted++;
-            }
-            catch (IOException ex)
-            {
-                // 文件正被其他进程占用时跳过，下次清理再删；不能让一个文件拖停整个 Worker。
-                logger.LogWarning(ex, "删除过期 PCD 失败: {Path}", file.FullName);
+                var stem = Path.GetFileNameWithoutExtension(file.Name);
+                try
+                {
+                    var bytes = file.Length;
+                    file.Delete();
+                    deleted++;
+                    deletedBytes += bytes;
+                    logger.LogInformation("已删除过期 PCD: runId={RunId} path={Path} modifiedAt={ModifiedAt:yyyy-MM-dd HH:mm:ss} bytes={Bytes}",
+                        runId, file.FullName, modifiedAt, bytes);
+                    foreach (var pattern in new[] { $"{stem}_rib_coords_*.json", $"{stem}_ribs_*.png" })
+                        foreach (var artifact in file.Directory!.EnumerateFiles(pattern))
+                        {
+                            artifact.Delete();
+                            artifactsDeleted++;
+                        }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    failed++;
+                    logger.LogWarning(ex, "PCD 或其附属文件清理失败: runId={RunId} path={Path}", runId, file.FullName);
+                }
             }
         }
-        if (deleted > 0)
-            logger.LogInformation("过期 PCD 清理完成: 已删除={Deleted}, 截止时间={Cutoff}", deleted, cutoff);
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            failed++;
+            logger.LogWarning(ex, "采集点云目录扫描中断: runId={RunId} root={Root}", runId, root);
+        }
+        logger.LogInformation("采集点云清理结果: runId={RunId} cutoff={Cutoff:yyyy-MM-dd HH:mm:ss} " +
+            "deletedPcd={DeletedPcd} deletedArtifacts={DeletedArtifacts} pcdBytes={PcdBytes} " +
+            "keptRecent={KeptRecent} keptProtected={KeptProtected} failures={Failures}",
+            runId, cutoff, deleted, artifactsDeleted, deletedBytes, recent, protectedFiles, failed);
     }
 }

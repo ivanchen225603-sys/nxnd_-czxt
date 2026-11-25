@@ -2,7 +2,7 @@ namespace CarPointCloudWebApi.Application;
 
 /// <summary>
 /// 处理一条到期的识牌任务：来车后等待首调延迟，向乙方查询本点位抓拍，
-/// 取来车窗口内最新的一条作为本车车牌；未取到则按间隔重试，共最多 3 次。
+/// 按本车实际到磅时间筛选并原子绑定唯一抓拍，未确认时按间隔重试，共最多 3 次。
 /// </summary>
 public sealed class PlateAcquisitionProcessor(IIntegrationRepository repository, PartnerLicensePlateClient client,
     IConfiguration configuration, ILogger logger)
@@ -26,34 +26,25 @@ public sealed class PlateAcquisitionProcessor(IIntegrationRepository repository,
             var requestTime = BusinessClock.Now;
             var data = await client.GetLicensePlateSnapshotForWorkflowAsync(
                 job.CameraIdentifier, job.WorkflowId, job.InteractionId, job.AttemptCount, stoppingToken);
-            var windowStart = job.CreatedAt.AddSeconds(-configuration.GetValue("PlateAcquisition:CaptureLeadToleranceSeconds", 5));
-            var windowEnd = job.CreatedAt.AddSeconds(configuration.GetValue("PlateAcquisition:DeadlineSeconds", 30));
-            var match = data
-                .Select(item => (Item: item, Ok: PartnerContract.TryParseTime(item.CaptureTime, out var at), At: at))
-                .Where(x => x.Ok && x.At >= windowStart && x.At <= windowEnd && x.Item.CameraId == job.CameraIdentifier &&
-                            PartnerContract.IsLicensePlate(x.Item.LicensePlate))
-                .OrderByDescending(x => x.At)
-                .FirstOrDefault();
-            if (match.Item is { } item)
+            var completedAt = BusinessClock.Now;
+            var candidates = data.Select(item => new LicensePlateRecord
             {
-                repository.CompletePlateAcquisitionJob(job, new LicensePlateRecord
-                {
-                    WorkflowId = job.WorkflowId,
-                    InteractionId = job.InteractionId,
-                    CameraIdentifier = job.CameraIdentifier,
-                    CameraId = item.CameraId,
-                    LicensePlate = item.LicensePlate,
-                    CaptureTime = match.At,
-                    EnterId = item.EnterId,
-                    RequestTime = requestTime,
-                    ResponseCode = 200,
-                    ResponseMessage = "success",
-                    IsSuccess = true,
-                    CreatedAt = BusinessClock.Now
-                });
+                WorkflowId = job.WorkflowId,
+                InteractionId = job.InteractionId,
+                CameraIdentifier = job.CameraIdentifier,
+                CameraId = item.CameraId,
+                LicensePlate = item.LicensePlate,
+                CaptureTime = PartnerContract.TryParseTime(item.CaptureTime, out var captured) ? captured : null,
+                EnterId = item.EnterId,
+                RequestTime = requestTime,
+                ResponseCode = 200,
+                ResponseMessage = "success",
+                IsSuccess = true,
+                CreatedAt = completedAt
+            }).ToArray();
+            if (candidates.Length > 0 && repository.TryCompletePlateAcquisitionJob(job, candidates))
                 return;
-            }
-            error = PlateFailureCode.NoCapture + " 乙方数组没有当前车辆的新抓拍";
+            error = PlateFailureCode.NoCapture + " 未找到可唯一归属本车的抓拍";
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
@@ -62,6 +53,11 @@ public sealed class PlateAcquisitionProcessor(IIntegrationRepository repository,
             logger.LogWarning("车牌外呼未完成：workflowId={WorkflowId}, attempt={Attempt}", job.WorkflowId, job.AttemptCount);
         }
 
+        logger.LogInformation("车牌匹配未确认 camera={CameraIdentifier} workflowId={WorkflowId} " +
+            "interactionId={InteractionId} attempt={Attempt} decisionAt={DecisionAt:yyyy-MM-dd HH:mm:ss.fff} " +
+            "terminal={Terminal} reason={Reason}",
+            job.CameraIdentifier, job.WorkflowId, job.InteractionId, job.AttemptCount, BusinessClock.Now,
+            job.AttemptCount >= MaxAttempts, error.Split(' ', 2)[0]);
         if (job.AttemptCount >= MaxAttempts)
             repository.FailPlateAcquisitionJob(job, error, BusinessClock.Now, maxAttempts: 0, BusinessClock.Now);
         else

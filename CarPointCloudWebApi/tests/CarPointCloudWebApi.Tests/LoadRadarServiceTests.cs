@@ -577,14 +577,17 @@ public sealed class LoadRadarServiceTests : IDisposable
         var worker = AcceptingWorker(prepared.WorkflowId);
         var standstill = StandstillService(worker);
 
-        var first = await standstill.ReportAsync("n1", new("n1", "CH4", "standstill-p1"));
+        var first = await standstill.ReportAsync("n1", new("n1", "CH4", "standstill-p1", arrival.ArrivedAt));
         Assert.Equal("dispatched", first.Status);
         Assert.Equal(prepared.WorkflowId, first.WorkflowId);
         Assert.Equal(VehicleArrivalRadarStatus.Succeeded, _workflow.Arrivals[prepared.WorkflowId].RadarStatus);
-        Assert.Equal($"/api/radars/scan-once?requestId={Uri.EscapeDataString(prepared.WorkflowId)}", Assert.Single(worker.Paths));
+        Assert.StartsWith($"/api/radars/scan-once?requestId={Uri.EscapeDataString(prepared.WorkflowId)}&captureUntil=",
+            Assert.Single(worker.Paths));
+        Assert.Equal(arrival.ArrivedAt.AddSeconds(10),
+            DateTimeOffset.Parse(Uri.UnescapeDataString(worker.Paths[0].Split("&captureUntil=")[1])));
 
         // 重复通知不再扫描
-        Assert.Equal("already", (await standstill.ReportAsync("n1", new("n1", "CH4", "standstill-p1"))).Status);
+        Assert.Equal("already", (await standstill.ReportAsync("n1", new("n1", "CH4", "standstill-p1", arrival.ArrivedAt))).Status);
         Assert.Single(worker.Paths);
         // 已触发扫描的原车次，JT128 到车登记照常（体积链不受影响）
         Assert.Equal(prepared.WorkflowId, PassageService().Prepare("n1", arrival).WorkflowId);
@@ -604,16 +607,35 @@ public sealed class LoadRadarServiceTests : IDisposable
         Assert.Null(_workflow.Arrivals[prepared.WorkflowId].LicensePlate);
 
         var worker = AcceptingWorker(prepared.WorkflowId);
-        var first = await StandstillService(worker).ReportAsync("n1", new("n1", "CH4", "standstill-pending-plate"));
+        var first = await StandstillService(worker).ReportAsync("n1", new("n1", "CH4", "standstill-pending-plate", arrival.ArrivedAt));
         Assert.Equal("dispatched", first.Status);
         Assert.Equal(prepared.WorkflowId, first.WorkflowId);
         Assert.Equal(VehicleArrivalRadarStatus.Succeeded, _workflow.Arrivals[prepared.WorkflowId].RadarStatus);
-        Assert.Equal($"/api/radars/scan-once?requestId={Uri.EscapeDataString(prepared.WorkflowId)}", Assert.Single(worker.Paths));
+        Assert.StartsWith($"/api/radars/scan-once?requestId={Uri.EscapeDataString(prepared.WorkflowId)}&captureUntil=",
+            Assert.Single(worker.Paths));
         // 派发后牌仍可能 PENDING——绑定靠 workflowId，不靠即时车牌。
         Assert.Equal(VehicleArrivalPlateStatus.Pending, _workflow.Arrivals[prepared.WorkflowId].PlateStatus);
         Assert.Equal("already", (await StandstillService(worker).ReportAsync("n1",
-            new("n1", "CH4", "standstill-pending-plate"))).Status);
+            new("n1", "CH4", "standstill-pending-plate", arrival.ArrivedAt))).Status);
         Assert.Single(worker.Paths);
+    }
+
+    [Fact]
+    public async Task DepartureClosesOnlyOriginalWorkflowAndOldStandstillIsNotDispatched()
+    {
+        var arrival = Arrival("standstill-old") with { ArrivedAt = DateTimeOffset.UtcNow.AddSeconds(-20) };
+        var prepared = PassageService().Prepare("n1", arrival);
+        var worker = AcceptingWorker(prepared.WorkflowId);
+        var standstill = StandstillService(worker);
+
+        var closed = await standstill.DepartAsync("n1", new("n1", "CH4", arrival.PassageId));
+        Assert.Equal("closed", closed.Status);
+        Assert.Equal($"/api/radars/scan-once/passage-ended?requestId={Uri.EscapeDataString(prepared.WorkflowId)}",
+            Assert.Single(worker.Paths));
+        var late = await standstill.ReportAsync("n1", new("n1", "CH4", arrival.PassageId, arrival.ArrivedAt));
+        Assert.Equal("expired", late.Status);
+        Assert.Single(worker.Paths);
+        Assert.Equal(VehicleArrivalRadarStatus.NotRequired, _workflow.Arrivals[prepared.WorkflowId].RadarStatus);
     }
 
     [Theory]

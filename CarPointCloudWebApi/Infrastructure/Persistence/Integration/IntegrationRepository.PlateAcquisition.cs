@@ -121,24 +121,42 @@ public partial class IntegrationRepository
     }
 
     /// <inheritdoc />
-    public void CompletePlateAcquisitionJob(PlateAcquisitionJob job, LicensePlateRecord record)
+    public bool TryCompletePlateAcquisitionJob(PlateAcquisitionJob job, IReadOnlyList<LicensePlateRecord> candidates)
     {
         using var conn = CreateConnection();
         conn.Open();
-        using var tx = conn.BeginTransaction();
+        using var tx = (DmTransaction)conn.BeginTransaction();
         try
         {
-            if (!LockPlateJobLease(conn, (DmTransaction)tx, job))
+            if (!LockPlateJobLease(conn, tx, job))
                 throw new DBConcurrencyException($"Plate acquisition job {job.Id} is no longer claimed.");
-            record.WorkflowId = job.WorkflowId;
-            record.InteractionId = job.InteractionId;
-            SaveLicensePlateRecord(conn, (DmTransaction)tx, record, bindWorkflow: true);
+            LockCameraAnchor(conn, tx, job.CameraIdentifier, required: true);
+            var (arrival, boundPlate) = ReadPlateArrival(conn, tx, job);
+            var offsets = ReadPlateCaptureOffsets(conn, tx, job.CameraIdentifier, arrival);
+            var window = PlateCaptureWindow.FromHistory(
+                offsets, _captureLeadSeconds, _captureWindowSeconds, _captureSkewSeconds);
+            var neighbors = ReadNeighboringArrivals(conn, tx, job, arrival, window.ToArrival - window.FromArrival);
+            var latestCapture = offsets.Count == 0 ? BusinessClock.Now.AddSeconds(_captureSkewSeconds) : (DateTime?)null;
+            var decisions = new List<(LicensePlateRecord Candidate, string Reason)>();
+            var record = window.MatchUnique(candidates, arrival, neighbors, latestCapture,
+                candidate => CaptureAlreadyClaimed(conn, tx, candidate),
+                (candidate, reason) => decisions.Add((candidate, reason)));
+            if (record is null)
+            {
+                tx.Commit();
+                LogPlateMatch(job, candidates.Count, arrival, offsets, window, neighbors.Count, decisions, null);
+                return false;
+            }
+            if (boundPlate is not null && !string.Equals(boundPlate, record.LicensePlate, StringComparison.Ordinal))
+                throw new InvalidOperationException("原来车已有不同的权威车牌，不能覆盖");
+
+            SaveLicensePlateRecord(conn, tx, record, bindWorkflow: true, captureVerified: true);
 
             // 分析可能早于车牌识别完成并以 UNKNOWN 入库。车牌任务完成时在同一事务
             // 回填所有已存在的 workflow 数据，避免接口查询看到互相矛盾的车辆身份。
             BackfillWorkflowLicensePlate(
                 conn,
-                (DmTransaction)tx,
+                tx,
                 job.WorkflowId,
                 record.LicensePlate,
                 record.CreatedAt);
@@ -149,7 +167,7 @@ public partial class IntegrationRepository
                       NextAttemptAt = ?, LastError = NULL, UpdatedAt = ?
                   WHERE Id = ? AND Status = 'PROCESSING' AND AttemptCount=? AND UpdatedAt=?",
                 conn,
-                (DmTransaction)tx);
+                tx);
             complete.Parameters.Add("@NextAttemptAt", DmDbType.DateTime).Value = record.CreatedAt;
             complete.Parameters.Add("@UpdatedAt", DmDbType.DateTime).Value = record.CreatedAt;
             complete.Parameters.Add("@Id", DmDbType.Int64).Value = job.Id;
@@ -160,12 +178,94 @@ public partial class IntegrationRepository
             }
 
             tx.Commit();
+            LogPlateMatch(job, candidates.Count, arrival, offsets, window, neighbors.Count, decisions, record);
+            return true;
         }
         catch
         {
             TryRollback(tx);
             throw;
         }
+    }
+
+    private void LogPlateMatch(PlateAcquisitionJob job, int candidateCount, DateTime arrival, IReadOnlyList<TimeSpan> offsets,
+        PlateCaptureWindow window, int neighborCount, List<(LicensePlateRecord Candidate, string Reason)> decisions,
+        LicensePlateRecord? record)
+    {
+        var decisionAt = BusinessClock.Now;
+        _logger?.LogInformation(
+            "车牌匹配 camera={CameraIdentifier} workflowId={WorkflowId} interactionId={InteractionId} attempt={Attempt} " +
+            "outcome={Outcome} arrivalAt={ArrivalAt:yyyy-MM-dd HH:mm:ss.fff} decisionAt={DecisionAt:yyyy-MM-dd HH:mm:ss.fff} " +
+            "arrivalToDecisionMs={ArrivalToDecisionMs} candidateCount={CandidateCount} neighborCount={NeighborCount} " +
+            "windowFromSec={WindowFromSec} windowToSec={WindowToSec} historyOffsetsSec=[{HistoryOffsetsSec}] " +
+            "plate={LicensePlate} captureAt={CaptureAt:yyyy-MM-dd HH:mm:ss.fff} enterId={EnterId}",
+            job.CameraIdentifier, job.WorkflowId, job.InteractionId, job.AttemptCount,
+            record is null ? "no_unique_match" : "committed", arrival, decisionAt,
+            (long)(decisionAt - arrival).TotalMilliseconds, candidateCount, neighborCount,
+            window.FromArrival.TotalSeconds, window.ToArrival.TotalSeconds,
+            string.Join(",", offsets.Select(offset => offset.TotalSeconds)), record?.LicensePlate, record?.CaptureTime, record?.EnterId);
+        foreach (var (candidate, reason) in decisions)
+            _logger?.LogInformation(
+                "车牌候选 camera={CameraIdentifier} workflowId={WorkflowId} interactionId={InteractionId} attempt={Attempt} " +
+                "plate={LicensePlate} captureAt={CaptureAt:yyyy-MM-dd HH:mm:ss.fff} enterId={EnterId} reason={Reason}",
+                job.CameraIdentifier, job.WorkflowId, job.InteractionId, job.AttemptCount,
+                candidate.LicensePlate, candidate.CaptureTime, candidate.EnterId, reason);
+    }
+
+    private (DateTime Arrival, string? BoundPlate) ReadPlateArrival(
+        DmConnection connection, DmTransaction tx, PlateAcquisitionJob job)
+    {
+        using var command = new DmCommand(
+            "SELECT ArrivalTime, PlateStatus, LicensePlate FROM VehicleArrival WHERE SessionId=? AND CameraIdentifier=?",
+            connection, tx) { CommandTimeout = _commandTimeoutSeconds };
+        AddVarcharParam(command, "@WorkflowId", 128, job.WorkflowId, required: true);
+        AddVarcharParam(command, "@CameraIdentifier", 64, job.CameraIdentifier, required: true);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("来车流程不存在或点位不符");
+        var boundPlate = reader.GetString(1) == VehicleArrivalPlateStatus.Succeeded && !reader.IsDBNull(2)
+            ? reader.GetString(2) : null;
+        return (reader.GetDateTime(0), boundPlate);
+    }
+
+    private List<TimeSpan> ReadPlateCaptureOffsets(
+        DmConnection connection, DmTransaction tx, string camera, DateTime arrival)
+    {
+        using var command = new DmCommand(
+            @"SELECT TOP 5 a.ArrivalTime, p.CaptureTime, p.EnterId
+              FROM VehicleArrival a JOIN LicensePlateRecord p ON p.WorkflowId=a.SessionId
+              WHERE a.CameraIdentifier=? AND a.ArrivalTime<? AND a.PlateStatus='SUCCEEDED'
+                    AND a.PlateSource='PARTNER' AND p.IsSuccess=1 AND p.CaptureTime IS NOT NULL
+                    AND p.CameraIdentifier=a.CameraIdentifier AND p.LicensePlate=a.LicensePlate AND p.EnterId IS NOT NULL
+              ORDER BY a.ArrivalTime DESC, a.Id DESC",
+            connection, tx) { CommandTimeout = _commandTimeoutSeconds };
+        AddVarcharParam(command, "@CameraIdentifier", 64, camera, required: true);
+        command.Parameters.Add("@ArrivalTime", DmDbType.DateTime).Value = arrival;
+        var offsets = new List<TimeSpan>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.IsNullOrWhiteSpace(reader.GetString(2))) continue;
+            var priorArrival = reader.GetDateTime(0);
+            offsets.Add(reader.GetDateTime(1) - priorArrival.AddTicks(-(priorArrival.Ticks % TimeSpan.TicksPerSecond)));
+        }
+        return offsets;
+    }
+
+    private List<DateTime> ReadNeighboringArrivals(
+        DmConnection connection, DmTransaction tx, PlateAcquisitionJob job, DateTime arrival, TimeSpan windowWidth)
+    {
+        using var command = new DmCommand(
+            "SELECT ArrivalTime FROM VehicleArrival WHERE CameraIdentifier=? AND SessionId<>? AND ArrivalTime BETWEEN ? AND ?",
+            connection, tx) { CommandTimeout = _commandTimeoutSeconds };
+        AddVarcharParam(command, "@CameraIdentifier", 64, job.CameraIdentifier, required: true);
+        AddVarcharParam(command, "@WorkflowId", 128, job.WorkflowId, required: true);
+        var span = windowWidth.Add(TimeSpan.FromSeconds(1));
+        command.Parameters.Add("@Before", DmDbType.DateTime).Value = arrival - span;
+        command.Parameters.Add("@After", DmDbType.DateTime).Value = arrival + span;
+        var neighbors = new List<DateTime>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) neighbors.Add(reader.GetDateTime(0));
+        return neighbors;
     }
 
     private static bool LockPlateJobLease(DmConnection connection, DmTransaction transaction, PlateAcquisitionJob job)

@@ -153,8 +153,8 @@ public sealed class WorkflowIdempotencyTests
             return true;
         }
 
-        public override void CompletePlateAcquisitionJob(PlateAcquisitionJob job, LicensePlateRecord record) =>
-            Completed.TrySetResult((job, record));
+        public override bool TryCompletePlateAcquisitionJob(PlateAcquisitionJob job,
+            IReadOnlyList<LicensePlateRecord> candidates) => Completed.TrySetResult((job, Assert.Single(candidates)));
 
         public override void FailPlateAcquisitionJob(
             PlateAcquisitionJob job,

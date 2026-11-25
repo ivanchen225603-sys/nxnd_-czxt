@@ -38,7 +38,7 @@ public static class PartnerQueryMapper
         {
             LicensePlate = row.LicensePlate,
             CameraIdentifier = row.CameraIdentifier,
-            GetTime = row.GetTime,
+            GetTime = PartnerContract.FormatTime(row.GetTime)!,
             Dimensions = dimensions
         };
     }

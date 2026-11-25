@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Threading.Channels;
 using System.Diagnostics;
 using CarPointCloudLadarWorker.Config;
@@ -24,7 +23,6 @@ public sealed class AnalysisWorker(
 
     private readonly LadarCaptureOptions _options = options.Value;
     private readonly Channel<AnalysisTask> _queue = Channel.CreateUnbounded<AnalysisTask>();
-    private readonly ConcurrentDictionary<string, AnalysisTask> _unavailable = new();
     private readonly object _gate = new();
     private readonly Dictionary<string, AnalysisRecord> _records = [];
     private readonly Queue<string> _order = new();
@@ -54,8 +52,6 @@ public sealed class AnalysisWorker(
             Save(restored.Record);
             if (pending)
                 _queue.Writer.TryWrite(restored);
-            else if (task.UnavailablePublicationPending)
-                _unavailable[task.Record.PairId] = task;
         }
         // 损坏文件已由任务存储移入隔离目录；登记告警，不能静默当作没有这个任务。
         foreach (var detail in tasks.QuarantinedPaths)
@@ -75,16 +71,6 @@ public sealed class AnalysisWorker(
         if (!_options.AnalysisEnabled)
             return;
 
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var analysis = RunAnalysisAsync(lifetime.Token);
-        var publication = PublishUnavailableAsync(lifetime.Token);
-        await Task.WhenAny(analysis, publication);
-        await lifetime.CancelAsync();
-        await Task.WhenAll(analysis, publication);
-    }
-
-    private async Task RunAnalysisAsync(CancellationToken stoppingToken)
-    {
         await foreach (var queued in _queue.Reader.ReadAllAsync(stoppingToken))
         {
             var task = queued;
@@ -137,43 +123,12 @@ public sealed class AnalysisWorker(
                             task.Pair.WorkflowId, task.FailureCount, task.NextAttemptAt, record.Error);
                     }
                 }
-                task = task with
-                {
-                    Record = record with { UpdatedAt = time.GetLocalNow().DateTime },
-                    UnavailablePublicationPending = record.Stage == AnalysisStage.Failed ||
-                        record.Stage == AnalysisStage.Completed && !record.HasDimensionPayload
-                };
+                task = task with { Record = record with { UpdatedAt = time.GetLocalNow().DateTime } };
                 Persist(task);
-                if (task.UnavailablePublicationPending)
-                    _unavailable[record.PairId] = task;
                 LogTiming(task.Pair, startedAt, record);
             }
             while (task.Record.Stage == AnalysisStage.Queued);
         }
-    }
-
-    private async Task PublishUnavailableAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2), time);
-        do
-        {
-            foreach (var task in _unavailable.Values)
-            {
-                stoppingToken.ThrowIfCancellationRequested();
-                try
-                {
-                    if (!await analyzer.ReportUnavailableAsync(task.Record, stoppingToken))
-                        continue;
-                    tasks.Save(task with { UnavailablePublicationPending = false });
-                    _unavailable.TryRemove(task.Record.PairId, out _);
-                }
-                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-                {
-                    logger.LogWarning(ex, "尺寸缺测状态待上报：workflowId={WorkflowId}", task.Record.WorkflowId);
-                }
-            }
-        }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
     private void Persist(AnalysisTask task)

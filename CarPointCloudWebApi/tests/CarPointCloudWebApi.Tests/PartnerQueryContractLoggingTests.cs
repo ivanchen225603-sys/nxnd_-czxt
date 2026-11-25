@@ -89,10 +89,11 @@ public sealed class PartnerQueryContractLoggingTests
     public async Task Vehicle_output_separates_external_width_plate_length_and_internal_metadata()
     {
         using var host = new PartnerQueryContractHost();
+        host.Repository.Vehicles[0].GetTime = new DateTime(2026, 10, 12, 9, 0, 1, 987);
         var result = await SendAsync(host, "/api/v1/vehicleDimensions?limit=1");
         var row = Envelope(result.Body, 200).GetProperty("data")[0];
         AssertFields(row, "licensePlate", "cameraIdentifier", "getTime", "dimensions");
-        Assert.Equal(host.Repository.Vehicles[0].GetTime, row.GetProperty("getTime").GetDateTime());
+        Assert.Equal("2026-10-12 09:00:01", row.GetProperty("getTime").GetString());
         var dimensions = row.GetProperty("dimensions");
         AssertFields(dimensions, "cabToTrailerFrontDist", "trailerLength", "trailerWidth", "trailerBodyHeight",
             "trailerBottomToGroundHeight", "highLowPlateHeight", "highLowPlates", "ribs", "wires");
@@ -113,21 +114,31 @@ public sealed class PartnerQueryContractLoggingTests
     }
 
     [Fact]
-    public async Task Vehicle_details_respect_document_array_caps_and_failed_dimensions_are_empty()
+    public async Task Vehicle_query_returns_a_row_only_after_the_dimension_record_is_saved()
     {
         using var host = new PartnerQueryContractHost();
         var vehicle = host.Repository.Vehicles[0];
+        vehicle.GetTime = new DateTime(2026, 10, 12, 9, 0, 1, 987);
         vehicle.ActualRibCount = 9;
         vehicle.Ribs = Enumerable.Range(1, 10).Reverse().Select(i => new RibInfo { RibId = i, DistToPrev = 100 }).ToList();
         vehicle.HighLowPlates = Enumerable.Range(1, 4).Select(i => new HighLowPlateInfo { PlateId = i, LengthCm = 100 }).ToList();
+        host.Repository.Vehicles.Clear();
+        var before = await SendAsync(host, "/api/v1/vehicleDimensions?limit=1");
+        Assert.Empty(Envelope(before.Body, 200).GetProperty("data").EnumerateArray());
+        host.Repository.Vehicles.Add(vehicle);
         var result = await SendAsync(host, "/api/v1/vehicleDimensions?limit=1");
-        var dimensions = Envelope(result.Body, 200).GetProperty("data")[0].GetProperty("dimensions");
+        var measured = Envelope(result.Body, 200).GetProperty("data")[0];
+        Assert.Equal(vehicle.LicensePlate, measured.GetProperty("licensePlate").GetString());
+        Assert.Equal("2026-10-12 09:00:01", measured.GetProperty("getTime").GetString());
+        var dimensions = measured.GetProperty("dimensions");
         Assert.Equal(6, dimensions.GetProperty("ribs").GetArrayLength());
         Assert.Equal(3, dimensions.GetProperty("highLowPlates").GetArrayLength());
         Assert.Empty(dimensions.GetProperty("wires").EnumerateArray());
         vehicle.DetectStatus = "failed";
         var failed = await SendAsync(host, "/api/v1/vehicleDimensions?limit=1");
-        Assert.Empty(Envelope(failed.Body, 200).GetProperty("data")[0].GetProperty("dimensions").EnumerateObject());
+        var failedRow = Envelope(failed.Body, 200).GetProperty("data")[0];
+        Assert.Equal("2026-10-12 09:00:01", failedRow.GetProperty("getTime").GetString());
+        Assert.Empty(failedRow.GetProperty("dimensions").EnumerateObject());
     }
 
     [Theory]
@@ -150,8 +161,8 @@ public sealed class PartnerQueryContractLoggingTests
         var capped = await SendAsync(host, path + "?limit=999");
         var data = Envelope(capped.Body, 200).GetProperty("data");
         Assert.Equal(100, data.GetArrayLength());
-        Assert.Equal("宁A34741", data[0].GetProperty("licensePlate").GetString());
-        Assert.Equal("宁A91308", data[99].GetProperty("licensePlate").GetString());
+        Assert.Equal(host.Repository.Vehicles.Single(vehicle => vehicle.Id == 105).LicensePlate, data[0].GetProperty("licensePlate").GetString());
+        Assert.Equal(host.Repository.Vehicles.Single(vehicle => vehicle.Id == 6).LicensePlate, data[99].GetProperty("licensePlate").GetString());
         // 换客户端来源以隔离限流窗口；请求业务参数和日志仍走同一条生产管线。
         Assert.Null(capped.Cursor);
         var continued = await SendAsync(host, path + "?cursor=unsupported", newSource: true);
@@ -167,7 +178,7 @@ public sealed class PartnerQueryContractLoggingTests
         var window = await SendAsync(host, path + "?timeWindow=120", newSource: true);
         Assert.Equal(2, Envelope(window.Body, 200).GetProperty("data").GetArrayLength());
         Assert.DoesNotContain(Envelope(window.Body, 200).GetProperty("data").EnumerateArray(),
-            row => row.GetProperty("licensePlate").GetString() == "宁A96523");
+            row => row.GetProperty("licensePlate").GetString() == host.Repository.Vehicles.Single(vehicle => vehicle.Id == 1).LicensePlate);
         AssertAudit(host, window);
         host.SaveEvidence(path.Split('/')[^1] + "-pagination", path + "?timeWindow=120", window.Interaction, window.Status, window.Body);
     }
@@ -195,11 +206,9 @@ public sealed class PartnerQueryContractLoggingTests
     [Theory]
     [InlineData("/api/v1/vehicleDimensions", "missing")]
     [InlineData("/api/v1/vehicleDimensions", "wrong")]
-    [InlineData("/api/v1/coalVolumes", "expired")]
     [InlineData("/api/v1/vehicleDimensions", "missing-timestamp")]
     [InlineData("/api/v1/coalVolumes", "missing-signature")]
     [InlineData("/api/v1/vehicleDimensions", "seconds")]
-    [InlineData("/api/v1/vehicleDimensions", "future")]
     [InlineData("/api/v1/coalVolumes", "uppercase-signature")]
     [InlineData("/api/v1/vehicleDimensions", "multiple-timestamps")]
     [InlineData("/api/v1/coalVolumes", "leading-zero")]
@@ -455,8 +464,7 @@ public sealed class PartnerQueryContractLoggingTests
         string? signature = null;
         if (auth != "missing")
         {
-            var timestamp = (auth == "expired" ? DateTimeOffset.UtcNow.AddMinutes(-2) : auth == "future" ? DateTimeOffset.UtcNow.AddMinutes(2) : DateTimeOffset.UtcNow)
-                .ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (auth == "seconds") timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (auth == "leading-zero") timestamp = "0" + timestamp;
             if (auth == "leading-plus") timestamp = "+" + timestamp;

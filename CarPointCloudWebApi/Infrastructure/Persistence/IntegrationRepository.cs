@@ -39,17 +39,22 @@ public partial class IntegrationRepository : IIntegrationRepository
     private readonly int _commandTimeoutSeconds;
     private readonly int _captureLeadSeconds;
     private readonly int _captureWindowSeconds;
+    private readonly int _captureSkewSeconds;
+    private readonly ILogger<IntegrationRepository>? _logger;
 
     /// <summary>创建承载第三方集成、点云结果和来车流程持久化的达梦仓储。</summary>
     /// <param name="configuration">数据库连接串和 SQL 命令超时配置。</param>
+    /// <param name="logger">记录已提交车牌的判断依据。</param>
     /// <exception cref="InvalidOperationException">数据库连接串缺失或为空。</exception>
-    public IntegrationRepository(IConfiguration configuration)
+    public IntegrationRepository(IConfiguration configuration, ILogger<IntegrationRepository>? logger = null)
     {
+        _logger = logger;
         _connectionString = configuration.GetConnectionString("CarPointCloudDb")
             ?? throw new InvalidOperationException("缺少数据库连接字符串 ConnectionStrings:CarPointCloudDb");
         _commandTimeoutSeconds = configuration.GetValue<int>("Database:CommandTimeoutSeconds", 30);
         _captureLeadSeconds = Math.Clamp(configuration.GetValue("PlateAcquisition:CaptureLeadToleranceSeconds", 5), 0, 60);
         _captureWindowSeconds = Math.Clamp(configuration.GetValue("PlateAcquisition:DeadlineSeconds", 30), 1, 30);
+        _captureSkewSeconds = Math.Clamp(configuration.GetValue("PlateAcquisition:ClockSkewToleranceSeconds", 5), 1, 60);
 
         if (string.IsNullOrWhiteSpace(_connectionString))
         {
@@ -62,11 +67,10 @@ public partial class IntegrationRepository : IIntegrationRepository
         return new DmConnection(_connectionString);
     }
 
-    private static void ValidatePageArguments(ref int take, DateTime? beforeTime, long? beforeId,
-        bool allowNegativeId = false)
+    private static void ValidatePageArguments(ref int take, DateTime? beforeTime, long? beforeId)
     {
         take = Math.Clamp(take, 1, 101);
-        if (beforeTime.HasValue != beforeId.HasValue || beforeId is 0 || (!allowNegativeId && beforeId is < 0))
+        if (beforeTime.HasValue != beforeId.HasValue || beforeId is <= 0)
         {
             throw new ArgumentException("分页锚点必须同时包含有效时间和记录 ID");
         }

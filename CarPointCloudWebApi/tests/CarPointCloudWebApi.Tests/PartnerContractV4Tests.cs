@@ -167,11 +167,12 @@ public class PartnerContractV4Tests
         Assert.Equal(3, handler.Calls);
     }
 
-    private static PartnerLicensePlateClient Client(HttpClient http, int attempts) => new(http,
+    private static PartnerLicensePlateClient Client(HttpClient http, int attempts, int timeoutMs = 3000) => new(http,
         new Monitor(new IntegrationOptions
         {
             AppSecret = "test-only",
             PartnerBaseUrl = "http://partner.local",
+            PartnerTimeoutMs = timeoutMs,
             PartnerRetryCount = attempts,
             PartnerFirstCallDelayMs = 0,
             PartnerRetryDelayMs = 0
@@ -188,16 +189,103 @@ public class PartnerContractV4Tests
         Assert.Equal(0, handler.Calls);
     }
 
-    private sealed class PartnerHandler(string body) : HttpMessageHandler
+    [Fact]
+    public async Task PartnerClient_UsesTheContractRequestAndPreservesOnlyValidCandidates()
+    {
+        using var handler = new PartnerHandler("""
+            {"code":200,"message":"success","data":[
+              {"cameraId":"CAM_001","licensePlate":"宁A25771","captureTime":"2026-11-19 15:00:12","enterID":"000042"},
+              {"cameraId":"CAM_002","licensePlate":"宁A25771","captureTime":"2026-11-19 15:00:12","enterID":"000043"},
+              {"cameraId":"CAM_001","licensePlate":"宁 A12345","captureTime":"2026-11-19 15:00:12","enterID":"000044"},
+              {"cameraId":"CAM_001","licensePlate":"宁A25771","captureTime":"2026-11-19T15:00:12","enterID":"000045"},
+              {"cameraId":"CAM_001","licensePlate":"宁A25771","captureTime":"2026-11-19 15:00:12"}, null]}
+            """);
+        using var http = new HttpClient(handler);
+        var items = await Client(http, 3).GetLicensePlateSnapshotForWorkflowAsync("CAM_001", "wf", "interaction", 1, default);
+
+        var record = Assert.Single(items);
+        Assert.Equal("000042", record.EnterId);
+        Assert.Equal("2026-11-19 15:00:12", record.CaptureTime);
+        Assert.Equal("GET", handler.Method);
+        Assert.Equal("http://partner.local/api/v1/licensePlateRecords?cameraIdentifier=CAM_001", handler.Url);
+        Assert.Equal("application/x-www-form-urlencoded", handler.ContentType);
+        Assert.Equal(0L, handler.ContentLength);
+        Assert.True(long.TryParse(handler.Timestamp, out var timestamp));
+        Assert.InRange(Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - timestamp), 0, 5000);
+        Assert.Equal(ApiSignatureHelper.GenerateSignature(handler.Timestamp!, "test-only"), handler.Signature);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "{}")]
+    [InlineData(HttpStatusCode.Unauthorized, "{}")]
+    [InlineData(HttpStatusCode.NotFound, "{}")]
+    [InlineData(HttpStatusCode.InternalServerError, "{}")]
+    [InlineData(HttpStatusCode.OK, "{\"code\":400,\"data\":null}")]
+    [InlineData(HttpStatusCode.OK, "{\"code\":200,\"data\":null}")]
+    [InlineData(HttpStatusCode.OK, "{\"code\":200,\"data\":{}}")]
+    [InlineData(HttpStatusCode.OK, "{bad-json")]
+    public async Task PartnerClient_Retries_errors_at_most_three_times(HttpStatusCode status, string body)
+    {
+        using var handler = new PartnerHandler(body, status);
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAnyAsync<Exception>(() => Client(http, 10).GetLicensePlateAsync("CAM_001"));
+        Assert.Equal(3, handler.Calls);
+    }
+
+    [Fact]
+    public async Task PartnerClient_Caps_each_request_at_three_seconds()
+    {
+        using var handler = new PartnerHandler("{}", delayUntilCanceled: true);
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Client(http, 3, timeoutMs: 60_000).GetLicensePlateSnapshotForWorkflowAsync("CAM_001", "wf", "int", 1, default)
+                .WaitAsync(TimeSpan.FromSeconds(4)));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Plate_fetch_returns_502_when_the_partner_errors_or_times_out(bool timesOut)
+    {
+        using var handler = new PartnerHandler("partner private fixture details", HttpStatusCode.InternalServerError,
+            delayUntilCanceled: timesOut);
+        using var http = new HttpClient(handler);
+        var controller = new IntegrationController(null!, Client(http, 3, timeoutMs: 40), null!, new ConfigurationBuilder().Build());
+
+        var response = await controller.FetchLicensePlate("CAM_001", default);
+
+        var result = Assert.IsType<ObjectResult>(response.Result);
+        Assert.Equal(502, result.StatusCode);
+        Assert.DoesNotContain("partner private fixture details", JsonSerializer.Serialize(result.Value));
+        Assert.Equal(3, handler.Calls);
+    }
+
+    private sealed class PartnerHandler(string body, HttpStatusCode status = HttpStatusCode.OK,
+        bool delayUntilCanceled = false) : HttpMessageHandler
     {
         public int Calls { get; private set; }
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public string? Method { get; private set; }
+        public string? Url { get; private set; }
+        public string? ContentType { get; private set; }
+        public long? ContentLength { get; private set; }
+        public string? Timestamp { get; private set; }
+        public string? Signature { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            Method = request.Method.Method;
+            Url = request.RequestUri?.AbsoluteUri;
+            ContentType = request.Content?.Headers.ContentType?.MediaType;
+            ContentLength = request.Content?.Headers.ContentLength;
+            Timestamp = request.Headers.GetValues("Timestamp").Single();
+            Signature = request.Headers.GetValues("Signature").Single();
+            if (delayUntilCanceled) await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new HttpResponseMessage(status)
             {
                 Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 

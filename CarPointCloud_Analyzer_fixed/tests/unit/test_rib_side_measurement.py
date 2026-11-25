@@ -84,6 +84,22 @@ def refine(points, ribs, current=None, *, final_cloud=False):
                                      final_cloud=final_cloud)
 
 
+def test_export_checks_rib_plane_separately_from_length_side_and_preserves_closure():
+    item = rib()
+    reference = measurement()
+    rows = refine(rod_points(item), [item], reference)
+    length = replace(reference, side_plane=(0., 0., 1.2), rib_side_projections=rows,
+                     metadata={'selectedSide': 'right', 'ribSideReference': {
+                         'selectedSide': 'left', 'sidePlane': list(reference.side_plane)}})
+    exported = measurement_metadata(length, [item])
+    assert exported['selectedSide'] == 'right'
+    assert exported['ribProjections'][0]['selectedSide'] == 'left'
+    assert exported['ribPositionsValid']
+    assert sum(exported['ribIntervalsM']) == pytest.approx(length.length)
+    rows[0] = {**rows[0], 'selectedSide': 'right'}
+    assert rib_projections([item], length)[0]['reason'] == 'rib_side_reference_mismatch'
+
+
 def test_refined_rib_and_axis_fallback_share_horizontal_length_coordinate():
     c, s = np.cos(np.arctan(.06)), np.sin(np.arctan(.06))
     rotation = np.array([[1., 0., 0.], [0., c, -s], [0., s, c]])

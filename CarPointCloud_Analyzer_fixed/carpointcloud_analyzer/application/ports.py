@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Iterable, Literal, Mapping, Protocol
 
 
 class DimensionStore(Protocol):
@@ -23,14 +23,14 @@ class DimensionStore(Protocol):
         """幂等写入一次车辆尺寸，可同时更新同车空车档案。"""
         ...
 
-    def record_dimension_unavailable(
-        self, workflow_id: str, camera: str, captured_at: datetime,
-    ) -> bool:
-        """为已登记的过车保留一次无法测量的结果。"""
-        ...
-
     def health(self) -> dict[str, Any]:
         """探测持久化后端是否可用。"""
+        ...
+
+    def complete_pending_empty_profile(
+        self, payload: Mapping[str, Any], empty_profile: Mapping[str, Any],
+    ) -> "PersistResult | Literal['pending', 'unidentified']":
+        """仅在本车次车牌已确认时保存延迟归档。"""
         ...
 
 
@@ -75,6 +75,15 @@ class StagedEmptyVehicleProfile:
         }
 
 
+@dataclass(frozen=True)
+class PendingEmptyVehicleProfile:
+    """待归档的尺寸载荷和已保存的本次净化点云。"""
+
+    receipt_path: Path
+    payload: Mapping[str, Any]
+    profile: StagedEmptyVehicleProfile
+
+
 class DisabledEmptyVehicleProfileStorage:
     """空车点云归档关闭时使用的无操作标记实现。"""
 
@@ -115,4 +124,17 @@ class EmptyProfileStorage(Protocol):
 
     def finalize(self, staged_path: str, persistence: Mapping[str, Any]) -> None:
         """完成档案替换并清理旧文件。"""
+        ...
+
+    def defer(self, source_pcd: str | Path, payload: Mapping[str, Any],
+              point_count: int, scan_time: datetime) -> None:
+        """保存迟到车牌对应的档案候选，独立于原始点云保留期。"""
+        ...
+
+    def pending(self) -> Iterable[PendingEmptyVehicleProfile]:
+        """读取尚未办结的档案候选。"""
+        ...
+
+    def finish_pending(self, job: PendingEmptyVehicleProfile, result: PersistResult | None) -> None:
+        """按数据库回执办结，或删去已确认无法识别的点云候选。"""
         ...

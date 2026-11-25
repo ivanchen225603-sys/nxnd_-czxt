@@ -66,8 +66,8 @@ public interface IIntegrationRepository
     bool SavePlateAcquisitionProgress(PlateAcquisitionJob job, string? candidateJson,
         DateTime nextAttemptAt, string? error, DateTime now) => false;
 
-    /// <summary>原子保存唯一车牌并完成对应任务和车辆流程。</summary>
-    void CompletePlateAcquisitionJob(PlateAcquisitionJob job, LicensePlateRecord record) =>
+    /// <summary>在同一事务中筛选并保存唯一归属的抓拍。</summary>
+    bool TryCompletePlateAcquisitionJob(PlateAcquisitionJob job, IReadOnlyList<LicensePlateRecord> candidates) =>
         throw new NotSupportedException();
 
     /// <summary>持久化任务失败状态；达到上限后同时把流程车牌状态置为失败。</summary>

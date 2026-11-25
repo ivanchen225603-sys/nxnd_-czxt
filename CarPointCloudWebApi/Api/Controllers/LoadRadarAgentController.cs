@@ -29,6 +29,11 @@ public sealed class LoadRadarAgentController(LoadRadarService service, LoadRadar
         [FromServices] LoadRadarStandstillService standstill) =>
         Ok(ApiResponse<object>.Success(await standstill.ReportAsync(NodeId, input)));
 
+    [HttpPost("passages/departure")]
+    public async Task<IActionResult> Departure(LoadPassageDeparture input,
+        [FromServices] LoadRadarStandstillService standstill) =>
+        Ok(ApiResponse<object>.Success(await standstill.DepartAsync(NodeId, input)));
+
     [HttpPost("measurements")]
     public IActionResult Ingest(LoadMeasurementInput input) =>
         Ok(ApiResponse<object>.Success(service.Ingest(NodeId, input)));

@@ -156,7 +156,7 @@ def test_extended_wall_bridge_keeps_sparse_rib_returns_in_final_cloud(monkeypatc
         })
 
     monkeypatch.setattr(pipeline, 'complete_empty_carriage_walls', complete)
-    monkeypatch.setattr(pipeline, 'needs_side_end_bridge', lambda *args: True)
+    monkeypatch.setattr(pipeline, 'side_ends_needing_bridge', lambda *args: frozenset({('right', 'frontWall')}))
     monkeypatch.setattr(analyzer, '_assess_load', lambda *args, **kwargs: LoadStatusResult('Empty', 1., 'test', {}))
     monkeypatch.setattr(pipeline, 'measure_final_inner_end_faces', lambda *args, **kwargs: None)
     monkeypatch.setattr(analyzer.dim_calc, 'calculate', lambda *args, ground_plane_local=None, synthetic_point_count=0: None)
@@ -172,6 +172,6 @@ def test_extended_wall_bridge_keeps_sparse_rib_returns_in_final_cloud(monkeypatc
                             height_plane_source=None, height_plane_calibrated=False)
     analyzer._analyze_standard(scene, pipeline._AnalysisMode('test.pcd', False, False, False))
     assert len(calls) == 2
-    assert calls[1]['bridge_long_side_gaps'] is True
+    assert calls[1]['bridge_long_side_gaps'] == {('right', 'frontWall')}
     assert detect.call_count == 2
     assert np.any(np.all(np.isclose(detect.call_args.args[0], sparse), axis=1))

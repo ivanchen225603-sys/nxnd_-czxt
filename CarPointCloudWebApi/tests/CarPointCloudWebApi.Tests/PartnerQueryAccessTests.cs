@@ -61,25 +61,38 @@ public sealed class PartnerQueryAccessTests
     }
 
     [Theory]
-    [InlineData("/api/v1/vehicleDimensions")]
-    [InlineData("/api/v1/coalVolumes")]
-    public async Task Signed_queries_work_without_partner_url_but_still_require_authentication(string path)
+    [InlineData("/api/v1/vehicleDimensions", -24)]
+    [InlineData("/api/v1/vehicleDimensions", 24)]
+    [InlineData("/api/v1/coalVolumes", -24)]
+    [InlineData("/api/v1/coalVolumes", 24)]
+    public async Task Signed_queries_accept_clock_skew_but_still_require_authentication(string path, int clockOffsetHours)
     {
         using var factory = new QueryOnlyFactory();
         using var client = factory.CreateClient();
         using var missing = await client.GetAsync(path + "?limit=1");
         Assert.Equal(HttpStatusCode.Unauthorized, missing.StatusCode);
-        using var wrong = await SendSignedAsync(client, path, "wrong-secret");
+        var clientTime = DateTimeOffset.UtcNow.AddHours(clockOffsetHours);
+        using var wrong = await SendSignedAsync(client, path, "wrong-secret", clientTime);
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
-        using var expired = await SendSignedAsync(client, path, QueryOnlyFactory.Secret, DateTimeOffset.UtcNow.AddMinutes(-2));
-        Assert.Equal(HttpStatusCode.Unauthorized, expired.StatusCode);
-        using var valid = await SendSignedAsync(client, path);
+        using var valid = await SendSignedAsync(client, path, at: clientTime);
         Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
         using var json = JsonDocument.Parse(await valid.Content.ReadAsStringAsync());
         Assert.Equal(new[] { "code", "data", "message" }, json.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(n => n));
         Assert.Equal(200, json.RootElement.GetProperty("code").GetInt32());
         Assert.Equal(JsonValueKind.Array, json.RootElement.GetProperty("data").ValueKind);
         Assert.Equal(0, factory.Outbound.Calls);
+    }
+
+    [Fact]
+    public async Task Signed_workflow_route_still_rejects_old_timestamps()
+    {
+        using var factory = new QueryOnlyFactory();
+        using var client = factory.CreateClient();
+        using var response = await SendSignedAsync(client, "/api/v1/vehicleWorkflows/workflow/licensePlate",
+            at: DateTimeOffset.UtcNow.AddMinutes(-2));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Contains("Timestamp 已过期", json.RootElement.GetProperty("message").GetString());
     }
 
     [Theory]

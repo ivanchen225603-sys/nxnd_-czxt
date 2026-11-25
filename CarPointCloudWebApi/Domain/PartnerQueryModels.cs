@@ -7,7 +7,7 @@ public sealed class PartnerVehicleDimensionDto
 {
     public string LicensePlate { get; init; } = string.Empty;
     public string CameraIdentifier { get; init; } = string.Empty;
-    public DateTime GetTime { get; init; }
+    public string GetTime { get; init; } = string.Empty;
     public object Dimensions { get; init; } = new { };
 }
 

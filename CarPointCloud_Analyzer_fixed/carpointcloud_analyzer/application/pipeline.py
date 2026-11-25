@@ -10,8 +10,10 @@ from carpointcloud_analyzer.domain.carriage import (BoxCompletionResult, Carriag
 from carpointcloud_analyzer.domain.config import Config
 from carpointcloud_analyzer.domain.dimensions import DimensionCalculator, vehicle_height_above_ground, vehicle_length_extent
 from carpointcloud_analyzer.domain.box_geometry import rotate_wl
-from carpointcloud_analyzer.domain.top_end_measurement import needs_side_end_bridge
-from carpointcloud_analyzer.domain.inner_length_measurement import measure_final_inner_end_faces
+from carpointcloud_analyzer.domain.top_end_measurement import side_ends_needing_bridge
+from carpointcloud_analyzer.domain.inner_length_measurement import (
+    measure_final_inner_end_faces, select_rib_side_reference,
+)
 from carpointcloud_analyzer.domain.top_opening import measure_top_opening_front_edge
 from carpointcloud_analyzer.domain.side_wall_measurement import measure_inner_width
 from carpointcloud_analyzer.domain.rib_side_measurement import refine_rib_side_positions
@@ -448,13 +450,13 @@ class PointCloudAnalyzer:
                 and split.boundaries_are_inner_faces and hasattr(profile, 'floor_z')
                 and all(wall_completion.get(name, {}).get('model', {}).get('valid') is True
                         for name in ('rearWall', 'frontWall'))
-                and needs_side_end_bridge(
+                and (gap_ends := side_ends_needing_bridge(
                     completed_carriage_points, split.carriage_start_y, split.split_y,
                     dimension_profile.floor_z, dimension_profile.wall_top,
-                )):
+                ))):
             extended = complete_empty_carriage_walls(
                 points_f, split.carriage_points, split, profile, self.config,
-                bridge_long_side_gaps=True,
+                bridge_long_side_gaps=gap_ends,
             )
             if any(seam.get('longGapHeightRows', 0) > 0
                    for seam in extended.metadata.get('cornerSeams', [])):
@@ -646,13 +648,20 @@ class PointCloudAnalyzer:
                 load_status.to_dict(), full_reference,
             )
 
-        # 9. 拉筋贴壁位置仍从同一份最终车厢云取得。
+        # 9. 杆形仍取最终车厢云；拉筋允许选用独立的实测侧壁，沿用业务内长端点和投影轴。
         if load_status.calculation_allowed and split.boundaries_are_inner_faces:
             measurement = split.longitudinal_measurement
             if measurement is not None and measurement.valid:
+                reference = (select_rib_side_reference(
+                    measurement, split.carriage_points, split.carriage_start_y, split.split_y,
+                    final_profile.floor_z, final_profile.wall_top, wall_completion,
+                ) if ribs else measurement)
+                metadata = measurement.metadata
+                if reference is not measurement:
+                    metadata = {**metadata, 'ribSideReference': reference.metadata}
                 split.longitudinal_measurement = replace(
-                    measurement, rib_side_projections=refine_rib_side_positions(
-                        final_carriage_points, ribs, measurement,
+                    measurement, metadata=metadata, rib_side_projections=refine_rib_side_positions(
+                        final_carriage_points, ribs, reference,
                         final_profile.floor_z, final_profile.wall_top,
                         final_cloud=True))
         else:

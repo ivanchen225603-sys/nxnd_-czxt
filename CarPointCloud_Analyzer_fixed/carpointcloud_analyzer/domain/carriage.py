@@ -612,15 +612,15 @@ def complete_empty_carriage_walls(
     profile: CarriageProfile,
     config: Config,
     *,
-    bridge_long_side_gaps: bool = False,
+    bridge_long_side_gaps: bool | frozenset[tuple[str, str]] = False,
 ) -> WallCompletionResult:
     """按车厢纵向中心面对称补全侧壁、前壁和后壁。
 
     函数名保留兼容；调用方在载荷判断之前生成候选，并检查端壁内表面和
     剖面质量。合成点不能提供判空证据。侧壁沿用“高侧补低侧”；前后壁只镜像端壁带内、底板
     以上的实测点，并在 3-D 邻域内去重。这样不会复制车头、底板或环境点。
-    ``bridge_long_side_gaps`` 仅供顶部端点断线时使用：双端壁均有实测面、
-    同高侧壁有连续回波，才沿侧壁面连接扫描盲段；不设固定缺口长度上限。
+    ``bridge_long_side_gaps`` 指定顶部断线的（侧壁，端壁）。双端壁均有实测面、
+    同高侧壁有连续回波，才从该端沿侧壁连接扫描盲段。旧调用传 True 时检查所有端点。
     """
     empty_points = np.empty((0, 3), dtype=float)
     skipped = WallCompletionResult(
@@ -756,6 +756,7 @@ def complete_empty_carriage_walls(
         end_metadata[name].get("model", {}).get("valid") is True
         for name in ("rearWall", "frontWall")
     )
+    bridge_ends = () if isinstance(bridge_long_side_gaps, bool) else bridge_long_side_gaps
     for name, boundary, direction in (
         ("rearWall", float(split.carriage_start_y), 1),
         ("frontWall", float(split.split_y), -1),
@@ -767,7 +768,8 @@ def complete_empty_carriage_walls(
                 config.carriage_completion_end_wall_band,
                 opposite_boundary_l=(
                     float(split.split_y if name == "rearWall" else split.carriage_start_y)
-                    if bridge_long_side_gaps and both_ends_modeled else None
+                    if both_ends_modeled and (bridge_long_side_gaps is True
+                                              or (side_name, name) in bridge_ends) else None
                 ),
             )
             if not len(strip):

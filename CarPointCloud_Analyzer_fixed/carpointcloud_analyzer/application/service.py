@@ -100,6 +100,9 @@ class AnalysisService:
         self._pair_jobs: dict[PairAnalyzeRequest, asyncio.Task] = {}
         self._completed_pairs: deque[PairAnalyzeRequest] = deque()
         self._execution_ids = count(1)
+        self._profile_stop = threading.Event()
+        self._profile_wake = threading.Event()
+        self._profile_worker: threading.Thread | None = None
 
     async def analyze(self, request: AnalyzeRequest) -> dict[str, Any]:
         """在线程池中异步执行单文件分析。"""
@@ -108,18 +111,6 @@ class AnalysisService:
     async def analyze_batch(self, request: BatchAnalyzeRequest) -> dict[str, Any]:
         """在线程池中异步执行一个顺序批次。"""
         return await self._run_bounded(self.analyze_batch_sync, request)
-
-    async def record_dimension_unavailable(
-        self, workflow_id: str, camera: str, captured_at: datetime,
-    ) -> dict[str, str]:
-        """登记 Worker 已结束的配对结果，采集时刻沿用原分析请求。"""
-        if not self._dimension_store.enabled:
-            return {"status": "disabled"}
-        recorded = await asyncio.to_thread(
-            self._dimension_store.record_dimension_unavailable,
-            workflow_id, camera, captured_at,
-        )
-        return {"status": "recorded" if recorded else "unknown_workflow"}
 
     async def analyze_pair(self, request: PairAnalyzeRequest) -> dict[str, Any]:
         """在线程池中异步执行固定 A/B 双雷达分析。"""
@@ -429,9 +420,42 @@ class AnalysisService:
             },
         }
 
+    def startup(self) -> None:
+        """独立恢复待识牌的空车档案，既不占分析线程也不等待来车。"""
+        if self._empty_profile_storage.enabled and self._profile_worker is None:
+            self._profile_worker = threading.Thread(
+                target=self._run_pending_profiles, name="carpointcloud-pending-archive", daemon=True)
+            self._profile_worker.start()
+
+    def _run_pending_profiles(self) -> None:
+        while not self._profile_stop.is_set():
+            self._profile_wake.clear()
+            for job in self._empty_profile_storage.pending():
+                if self._profile_stop.is_set():
+                    return
+                workflow_id = job.payload.get("workflowId")
+                try:
+                    receipt = self._dimension_store.complete_pending_empty_profile(
+                        job.payload, job.profile.to_mapping())
+                    if receipt == "pending":
+                        continue
+                    if receipt == "unidentified":
+                        self._empty_profile_storage.finish_pending(job, None)
+                        logger.info("空车档案未绑定车牌 workflowId=%s", workflow_id)
+                    else:
+                        self._empty_profile_storage.finish_pending(job, receipt)
+                        logger.info("空车档案已补登 workflowId=%s recordId=%s", workflow_id, receipt.record_id)
+                except Exception:
+                    logger.exception("空车档案补登未完成，将重试 workflowId=%s", workflow_id)
+            self._profile_wake.wait(3)
+
     def shutdown(self) -> None:
         """等待在途分析完成并关闭工作线程池。"""
         self._executor.shutdown(wait=True, cancel_futures=True)
+        self._profile_stop.set()
+        self._profile_wake.set()
+        if self._profile_worker is not None:
+            self._profile_worker.join()
 
     def _build_config(
         self, request: AnalyzeRequest | BatchAnalyzeRequest | PairAnalyzeRequest
@@ -524,7 +548,7 @@ class AnalysisService:
         captured_at: datetime | None,
         empty_profile_source: str | None,
     ):
-        """车牌可辨识时把最终净化点云暂存为永久档案候选。
+        """保存最终净化点云；待识牌车次由独立线程补登。
 
         Returns:
             暂存句柄；不满足归档条件时返回 ``None``。
@@ -534,7 +558,8 @@ class AnalysisService:
         """
         archive_eligible = (self._empty_profile_storage.enabled
                             and empty_profile_source is not None)
-        if not archive_eligible or not _has_identified_plate(dimension_payload):
+        identified = _has_identified_plate(dimension_payload)
+        if not archive_eligible or (not workflow_id and not identified):
             return None
         # 空车即使部分尺寸缺测，也应保存本次最终补点云；Loaded/Uncertain
         # 不能仅凭候选结构或可空尺寸替代空车判定。
@@ -545,13 +570,22 @@ class AnalysisService:
         completed_profile_source = outputs.get("pcd")
         completed_profile_count = outputs.get("pcdPointCount")
         if not completed_profile_source or not completed_profile_count:
+            if not identified:
+                logger.warning("无最终净化点云，本车只保存尺寸 workflowId=%s", workflow_id)
+                return None
             raise ValueError("permanent profile requires a completed clean PCD")
+        scan_time = captured_at or datetime.now()
+        if not identified:
+            self._empty_profile_storage.defer(completed_profile_source, dimension_payload,
+                                              int(completed_profile_count), scan_time)
+            self._profile_wake.set()
+            return None
         return self._empty_profile_storage.stage(
             completed_profile_source,
             str(dimension_payload.get("licensePlate") or ""),
             workflow_id or pair_id or str(dimension_payload["idempotencyKey"]),
             int(completed_profile_count),
-            captured_at or datetime.now(),
+            scan_time,
         )
 
     def _archive_and_persist(

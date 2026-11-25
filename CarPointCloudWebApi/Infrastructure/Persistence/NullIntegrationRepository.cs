@@ -53,9 +53,8 @@ public class NullIntegrationRepository : IIntegrationRepository
     }
 
     /// <inheritdoc />
-    public virtual void CompletePlateAcquisitionJob(PlateAcquisitionJob job, LicensePlateRecord record)
-    {
-    }
+    public virtual bool TryCompletePlateAcquisitionJob(PlateAcquisitionJob job,
+        IReadOnlyList<LicensePlateRecord> candidates) => false;
 
     /// <inheritdoc />
     public virtual void FailPlateAcquisitionJob(

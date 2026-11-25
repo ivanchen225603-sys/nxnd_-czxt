@@ -16,6 +16,7 @@ public partial class IntegrationRepository
 
         try
         {
+            LockCameraAnchor(conn, (DmTransaction)tx, record.CameraIdentifier, required: false);
             InsertVehicleArrival(conn, (DmTransaction)tx, record, _commandTimeoutSeconds);
             tx.Commit();
             return new VehicleArrivalInsertResult { Record = record, IsNew = true };

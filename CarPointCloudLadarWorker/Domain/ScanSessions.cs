@@ -89,29 +89,70 @@ public sealed class ScanSessions
     }
 
     /// <summary>开始一次扫描；requestId 为空时自动生成。</summary>
-    public ScanCommandResult Start(string? requestId)
+    public ScanCommandResult Start(string? requestId, DateTimeOffset? captureUntil = null)
     {
         var id = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId.Trim();
         lock (_gate)
         {
             ExpireLocked();
-            if (id.Length > MaxRequestIdLength || id.Any(char.IsControl))
+            if (!ValidRequestId(id))
                 return ResultLocked(false, false, false, "invalid_request_id",
                     $"requestId 必须是 1-{MaxRequestIdLength} 个非控制字符（与 Analyzer 的 workflowId 契约一致）", _current);
             if (_byRequest.TryGetValue(id, out var existing))
-                return ResultLocked(true, false, true, "existing",
-                    "相同 requestId 已存在，返回原会话而不重复开启扫描", existing);
+                return existing.ClosedByDeparture
+                    ? ResultLocked(false, false, true, "vehicle_departed", "本车次已经离场", existing)
+                    : ResultLocked(true, false, true, "existing",
+                        "相同 requestId 已存在，返回原会话而不重复开启扫描", existing);
+            var remaining = captureUntil - _time.GetUtcNow();
+            if (remaining <= TimeSpan.Zero || remaining > TimeSpan.FromSeconds(30))
+                return ResultLocked(false, false, false, "capture_window_closed", "本车次自动采集窗口无效或已结束", null);
             if (_current?.Outcome == ScanOutcome.InProgress)
                 return ResultLocked(false, false, false, "busy", "已有单次扫描会话正在执行", _current);
 
-            _current = new Session(id, _time.GetLocalNow().DateTime, _time.GetTimestamp(), _cameras, _discards);
-            _byRequest[id] = _current;
-            _requestOrder.Enqueue(id);
-            if (_requestOrder.Count > MaxRememberedRequests)
-                _byRequest.Remove(_requestOrder.Dequeue());
+            _current = NewSession(id, Math.Min(_timeoutSeconds, remaining?.TotalSeconds ?? _timeoutSeconds));
+            RememberLocked(_current);
             return ResultLocked(true, true, false, "scanning",
                 $"扫描会话已创建，每台雷达将先丢弃 {_discards} 份完整场再采集", _current);
         }
+    }
+
+    /// <summary>关闭已离场的车次；离场先于派发时也要拒绝该车次的迟到指令。</summary>
+    public ScanCommandResult EndPassage(string requestId)
+    {
+        requestId = requestId.Trim();
+        lock (_gate)
+        {
+            ExpireLocked();
+            if (!ValidRequestId(requestId))
+                return ResultLocked(false, false, false, "invalid_request_id", "无效的车次标识", null);
+            var session = _current?.RequestId == requestId ? _current : _byRequest.GetValueOrDefault(requestId);
+            if (session is null)
+            {
+                session = NewSession(requestId, _timeoutSeconds);
+                RememberLocked(session);
+            }
+            if (session.Outcome != ScanOutcome.InProgress)
+                return ResultLocked(true, false, true, "already_closed", "本车次没有活动扫描", session);
+            session.ClosedByDeparture = true;
+            const string reason = "车辆离场，未收齐的点云不会配对";
+            session.Finish(ScanOutcome.Cancelled, reason, _time.GetLocalNow().DateTime);
+            _logger.LogInformation("因离场关闭扫描会话: workflowId={WorkflowId}", requestId);
+            return ResultLocked(true, false, false, "cancelled", reason, session);
+        }
+    }
+
+    private static bool ValidRequestId(string id) =>
+        id.Length is > 0 and <= MaxRequestIdLength && !id.Any(char.IsControl);
+
+    private Session NewSession(string id, double timeoutSeconds) =>
+        new(id, _time.GetLocalNow().DateTime, _time.GetTimestamp(), _cameras, _discards, timeoutSeconds);
+
+    private void RememberLocked(Session session)
+    {
+        _byRequest.Add(session.RequestId, session);
+        _requestOrder.Enqueue(session.RequestId);
+        if (_requestOrder.Count > MaxRememberedRequests)
+            _byRequest.Remove(_requestOrder.Dequeue());
     }
 
     /// <summary>取消当前会话；带 expectedRequestId 时只在归属一致时取消。</summary>
@@ -198,11 +239,11 @@ public sealed class ScanSessions
     {
         var session = _current;
         if (session?.Outcome != ScanOutcome.InProgress ||
-            _time.GetElapsedTime(session.StartedTimestamp).TotalSeconds < _timeoutSeconds)
+            _time.GetElapsedTime(session.StartedTimestamp).TotalSeconds < session.TimeoutSeconds)
             return;
 
         var missing = string.Join(", ", _cameras.Where(x => !session.Captured.Contains(x)));
-        var error = $"单次扫描超过 {_timeoutSeconds:0}s，未完成雷达: {missing}";
+        var error = $"单次扫描已达到 {session.TimeoutSeconds:0.###} 秒采集截止，未完成雷达: {missing}";
         session.Finish(ScanOutcome.TimedOut, error, _time.GetLocalNow().DateTime);
         _logger.LogError("扫描会话超时: workflowId={WorkflowId}, {Error}", session.RequestId, error);
     }
@@ -222,15 +263,17 @@ public sealed class ScanSessions
         s is null ? [] : [.. _cameras.Where(s.Captured.Contains)],
         s is null ? [] : [.. _cameras.Where(s.Persisted.Contains)],
         s?.LastError,
-        _timeoutSeconds);
+        s?.TimeoutSeconds ?? _timeoutSeconds);
 
     private sealed class Session(
-        string requestId, DateTime startedAt, long startedTimestamp, string[] cameras, int discards)
+        string requestId, DateTime startedAt, long startedTimestamp, string[] cameras, int discards, double timeoutSeconds)
     {
         public string RequestId { get; } = requestId;
         public string SessionId { get; } = Guid.NewGuid().ToString("N");
         public DateTime StartedAt { get; } = startedAt;
         public long StartedTimestamp { get; } = startedTimestamp;
+        public double TimeoutSeconds { get; } = timeoutSeconds;
+        public bool ClosedByDeparture { get; set; }
         public Dictionary<string, int> RemainingDiscards { get; } = cameras.ToDictionary(x => x, _ => discards);
         public HashSet<string> Captured { get; } = [];
         public HashSet<string> Persisted { get; } = [];

@@ -104,6 +104,25 @@ def test_complete_empty_carriage_walls_fills_side_front_and_rear_only():
     assert result.points[:, 1].max() <= 10.12, "车头不得被镜像"
 
 
+def test_long_bridge_is_enabled_only_at_the_requested_corner(monkeypatch):
+    from carpointcloud_analyzer.domain import carriage as module
+
+    vehicle, carriage, split, profile = _incomplete_empty_trailer()
+    strip = module.complete_side_end_strip
+    calls = {}
+
+    def record(source, plane, model, boundary, direction, band, *, opposite_boundary_l):
+        side = 'left' if plane[2] < 0 else 'right'
+        calls[(side, 'rearWall' if direction == 1 else 'frontWall')] = opposite_boundary_l
+        return strip(source, plane, model, boundary, direction, band, opposite_boundary_l=opposite_boundary_l)
+
+    monkeypatch.setattr(module, 'complete_side_end_strip', record)
+    complete_empty_carriage_walls(vehicle, carriage, split, profile, Config(),
+                                  bridge_long_side_gaps=frozenset({('right', 'frontWall')}))
+    assert calls == {('left', 'rearWall'): None, ('left', 'frontWall'): None,
+                     ('right', 'rearWall'): None, ('right', 'frontWall'): split.carriage_start_y}
+
+
 def test_complete_empty_carriage_walls_can_disable_end_wall_fill():
     vehicle, carriage, split, profile = _incomplete_empty_trailer()
     cfg = Config(carriage_complete_end_walls=False)
