@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 using CarPointCloudLadarWorker.Analysis;
+using CarPointCloudLadarWorker.Api;
 using CarPointCloudLadarWorker.Hosting;
 using CarPointCloudWebApi.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,9 +23,13 @@ public sealed class EndToEndTests : IAsyncLifetime
          "persistence":{"status":"inserted"}}
         """));
     private readonly HttpClient _http = new();
+    private readonly TestSupport.StubHandler _evidence = new(_ =>
+        TestSupport.Json("""{"code":200,"data":{"status":"confirmed"}}"""));
     private IHost _host = null!;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    private async Task StartAsync(int guardMs = 0, bool verifiedTiming = true)
     {
         var options = TestSupport.Options(o =>
         {
@@ -30,14 +37,23 @@ public sealed class EndToEndTests : IAsyncLifetime
             o.SyntheticFrameIntervalSeconds = 0.05;
             o.SyntheticPointCount = 200;
             o.SyntheticInterDeviceDelayMilliseconds = 5;
-            o.MaximumFrameDeliveryDelayMilliseconds = 0;
+            o.MaximumFrameDeliveryDelayMilliseconds = guardMs;
             o.CaptureDirectory = _captureDirectory;
             o.HttpApiPort = _port;
             o.HealthLogIntervalSeconds = 0;
+            o.EnableApiRequests = true;
+            o.AppSecret = "test-only";
+            foreach (var device in o.Devices)
+            {
+                device.VerifiedMaxScanDurationMs = verifiedTiming ? 40 : null;
+                device.VerifiedMaxCallbackDelayMs = 2;
+                device.VerifiedClockUncertaintyMs = 1;
+            }
         });
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddWorker(options);
         builder.Services.AddHttpClient<AnalyzerClient>().ConfigurePrimaryHttpMessageHandler(() => _analyzer);
+        builder.Services.AddHttpClient<StaticEvidenceClient>().ConfigurePrimaryHttpMessageHandler(() => _evidence);
         _host = builder.Build();
         await _host.StartAsync();
         _http.BaseAddress = new Uri($"http://127.0.0.1:{_port}");
@@ -45,13 +61,18 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await _host.StopAsync();
-        _host.Dispose();
+        if (_host is not null)
+        {
+            await _host.StopAsync();
+            _host.Dispose();
+        }
+        _http.Dispose();
     }
 
     [Fact]
     public async Task ScanOnce_CapturesBothRadars_AnalyzesPair_AndAnswersWebApiDispatch()
     {
+        await StartAsync();
         var start = await SendAsync(HttpMethod.Post, "/api/radars/scan-once?requestId=wf-e2e");
         var repeat = await SendAsync(HttpMethod.Post, "/api/radars/scan-once?requestId=wf-e2e");
         var busy = await SendAsync(HttpMethod.Post, "/api/radars/scan-once?requestId=wf-other");
@@ -83,6 +104,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     [Fact]
     public async Task StatusEndpoints_ReportRadarsAndPreview()
     {
+        await StartAsync();
         var live = await WaitForAsync("/api/radars/live/status",
             x => x["radars"]!.AsArray().All(r => (long)r!["rawFrameCount"]! > 0));
 
@@ -96,9 +118,81 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal(400, (await SendAsync(HttpMethod.Get, "/api/radars/live/fused-frame?afterVersion=-1")).StatusCode);
     }
 
-    private async Task<RadarWorkerResponse> SendAsync(HttpMethod method, string path)
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AutomaticCaptureRequiresTheSameSegmentBeforeSubmittingThePair(bool providesSegment)
     {
-        using var response = await _http.SendAsync(new HttpRequestMessage(method, path));
+        await StartAsync();
+        var deadline = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddSeconds(10).ToString("O"));
+        var segment = providesSegment ? "&segmentId=stop-e2e" : "";
+        var response = await SendAsync(HttpMethod.Post, $"/api/radars/scan-once?requestId=auto&captureUntil={deadline}{segment}");
+        Assert.Equal(202, response.StatusCode);
+        var outcome = await WaitForAsync("/api/radars/analysis?workflowId=auto",
+            data => (string?)data["stage"] is "completed" or "failed");
+        Assert.Equal(providesSegment ? "confirmed" : "insufficient", (string?)outcome["staticStatus"]);
+        Assert.Equal(providesSegment ? 1 : 0, _analyzer.Requests.Count);
+        Assert.All(outcome["sourcePcdPaths"]!.AsArray(), path => Assert.True(File.Exists((string)path!)));
+        if (providesSegment)
+        {
+            var evidence = JsonNode.Parse(Assert.Single(_evidence.Requests).Body)!;
+            Assert.Equal("stop-e2e", (string?)evidence["segmentId"]);
+            Assert.Equal((string?)outcome["pairId"], (string?)evidence["pairId"]);
+            foreach (var name in new[] { "primary", "secondary" })
+            {
+                var callback = evidence[name]!["callbackUtc"]!.GetValue<DateTimeOffset>();
+                Assert.Equal(callback.AddMilliseconds(-43), evidence[name]!["scanStartUtc"]!.GetValue<DateTimeOffset>());
+                Assert.Equal(callback.AddMilliseconds(1), evidence[name]!["scanEndUtc"]!.GetValue<DateTimeOffset>());
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SignedEarlyPairPersistsBothCloudsAndRequiresVerifiedTimingEvenWhenServerConfirms(bool verifiedTiming)
+    {
+        await StartAsync(guardMs: 15000, verifiedTiming: verifiedTiming);
+        var until = DateTimeOffset.UtcNow.AddSeconds(10);
+        var message = FormattableString.Invariant($"standstill-scan\nauto\nseg\n{until.ToUnixTimeMilliseconds()}");
+        var mac = HMACSHA256.HashData("test-only"u8, Encoding.UTF8.GetBytes(message));
+        var signature = Convert.ToHexString(mac).ToLowerInvariant();
+        var path = $"/api/radars/scan-once?requestId=auto&captureUntil={Uri.EscapeDataString(until.ToString("O"))}&segmentId=seg";
+        Assert.Equal(202, (await SendAsync(HttpMethod.Post, path, signature)).StatusCode);
+        var result = await WaitForAsync("/api/radars/analysis?workflowId=auto",
+            data => (string?)data["stage"] is "completed" or "failed");
+        Assert.Equal(verifiedTiming ? "confirmed" : "insufficient", (string?)result["staticStatus"]);
+        Assert.Equal(verifiedTiming ? 1 : 0, _analyzer.Requests.Count);
+        var files = result["sourcePcdPaths"]!.AsArray();
+        Assert.Equal(2, files.Count);
+        Assert.All(files, file => Assert.True(File.Exists((string)file!)));
+    }
+
+    [Fact]
+    public void EarlyDispatchSignatureRequiresLoopbackAndTheExactWorkflowSegmentAndDeadline()
+    {
+        var deadline = DateTimeOffset.FromUnixTimeMilliseconds(10000);
+        const string signed = "aa39017478f05ca69ad9226e529ea9af97eb2eba017c73f67a68d3cbb49a7c4c";
+        bool Verify(string address = "127.0.0.1", string secret = "test-only", string workflow = "wf",
+            string? segment = "seg", long adjustment = 0, string? signature = signed) =>
+            ControlApiServer.IsSignedStandstillDispatch(IPAddress.Parse(address), secret, workflow, segment,
+                deadline.AddMilliseconds(adjustment), signature);
+        Assert.True(Verify());
+        Assert.True(Verify(address: "::1"));
+        Assert.False(Verify(address: "192.0.2.1"));
+        Assert.False(Verify(secret: "other"));
+        Assert.False(Verify(workflow: "other"));
+        Assert.False(Verify(segment: null));
+        Assert.False(Verify(segment: "other"));
+        Assert.False(Verify(adjustment: 1));
+        Assert.False(Verify(signature: null));
+    }
+
+    private async Task<RadarWorkerResponse> SendAsync(HttpMethod method, string path, string? signature = null)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        if (signature is not null) request.Headers.Add("X-Standstill-Dispatch", signature);
+        using var response = await _http.SendAsync(request);
         return new RadarWorkerResponse((int)response.StatusCode, JsonNode.Parse(await response.Content.ReadAsStringAsync()), null);
     }
 

@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace CarPointCloudWebApi.Infrastructure;
@@ -9,7 +12,7 @@ public sealed record RadarWorkerResponse(int StatusCode, JsonNode? Body, string?
 }
 
 /// <summary>访问双雷达 Worker（Radar:BaseUrl）的实时预览、扫描与分析端点。</summary>
-public sealed class RadarLiveClient(IHttpClientFactory httpClientFactory)
+public sealed class RadarLiveClient(IHttpClientFactory httpClientFactory, IConfiguration? configuration = null)
 {
     public const string HttpClientName = "RadarLive";
 
@@ -23,12 +26,21 @@ public sealed class RadarLiveClient(IHttpClientFactory httpClientFactory)
         SendAsync(HttpMethod.Get, $"/api/radars/analysis?workflowId={Uri.EscapeDataString(workflowId)}", cancellationToken);
 
     public Task<RadarWorkerResponse> StartScanAsync(string workflowId, CancellationToken cancellationToken,
-        DateTimeOffset? captureUntil = null)
+        DateTimeOffset? captureUntil = null, string? segmentId = null)
     {
         var path = $"/api/radars/scan-once?requestId={Uri.EscapeDataString(workflowId)}";
         if (captureUntil is { } until)
             path += "&captureUntil=" + Uri.EscapeDataString(until.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
-        return SendAsync(HttpMethod.Post, path, cancellationToken);
+        if (segmentId is not null) path += "&segmentId=" + Uri.EscapeDataString(segmentId);
+        string? signature = null;
+        var secret = configuration?["Integration:AppSecret"];
+        if (captureUntil.HasValue && !string.IsNullOrWhiteSpace(segmentId) && !string.IsNullOrWhiteSpace(secret))
+        {
+            var expires = captureUntil.Value.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
+            var dispatch = Encoding.UTF8.GetBytes($"standstill-scan\n{workflowId}\n{segmentId}\n{expires}");
+            signature = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), dispatch)).ToLowerInvariant();
+        }
+        return SendAsync(HttpMethod.Post, path, cancellationToken, signature);
     }
 
     public Task<RadarWorkerResponse> EndPassageAsync(string workflowId, CancellationToken cancellationToken) =>
@@ -40,9 +52,12 @@ public sealed class RadarLiveClient(IHttpClientFactory httpClientFactory)
     public Task<RadarWorkerResponse> GetFusedFrameAsync(long afterVersion, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Get, $"/api/radars/live/fused-frame?afterVersion={afterVersion}", cancellationToken);
 
-    private async Task<RadarWorkerResponse> SendAsync(HttpMethod method, string requestUri, CancellationToken cancellationToken)
+    private async Task<RadarWorkerResponse> SendAsync(HttpMethod method, string requestUri, CancellationToken cancellationToken,
+        string? dispatchSignature = null)
     {
         using var request = new HttpRequestMessage(method, requestUri);
+        if (dispatchSignature is not null)
+            request.Headers.Add("X-Standstill-Dispatch", dispatchSignature);
         if (method == HttpMethod.Post)
             request.Content = new ByteArrayContent([]);
         using var response = await httpClientFactory.CreateClient(HttpClientName).SendAsync(request, cancellationToken);

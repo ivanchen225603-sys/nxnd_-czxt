@@ -103,11 +103,12 @@ public sealed class RadarHost(
     {
         // 时间戳取在回调入口：扫描会话据此判断这场是否早于指令。
         var timestamp = time.GetTimestamp();
+        var callbackUtc = time.GetUtcNow();
         var device = Find(sdk);
         switch ((ushort)Marshal.ReadInt16(frame, 2))
         {
             case 118:
-                OnPointCloud(device, sdk, frame, frameLength, timestamp);
+                OnPointCloud(device, sdk, frame, frameLength, timestamp, callbackUtc);
                 break;
             case 7105: logger.LogWarning("检测到雷达脏污或遮挡: {Camera}", device.Camera); break;
             case 7106: logger.LogInformation("雷达脏污或遮挡已恢复: {Camera}", device.Camera); break;
@@ -116,9 +117,10 @@ public sealed class RadarHost(
         }
     }
 
-    private void OnPointCloud(RadarDevice device, SdkDevice sdk, IntPtr frame, int frameLength, long timestamp)
+    private void OnPointCloud(RadarDevice device, SdkDevice sdk, IntPtr frame, int frameLength, long timestamp,
+        DateTimeOffset callbackUtc)
     {
-        var now = DateTime.Now;
+        var now = callbackUtc.LocalDateTime;
         device.RecordRaw(now);
         if (sdk.Parse118(frame, frameLength, out var points) <= 0 || points.Length == 0)
             return;
@@ -127,13 +129,14 @@ public sealed class RadarHost(
         device.RecordDecoded(now, timestamp, finite, time);
         preview.Observe(device.Camera, points, finite, now);
 
-        var workflowId = sessions.Offer(device.Camera, finite, timestamp);
+        var workflowId = sessions.Offer(device.Camera, finite, timestamp, out var window);
         if (workflowId is null)
             return;
 
         device.RecordAccepted();
         frames.Writer.TryWrite(new PointCloudFrame(
-            [.. points.Where(PointFilter.IsFinite)], device.Camera, Source, now, workflowId));
+            [.. points.Where(PointFilter.IsFinite)], device.Camera, Source, now, workflowId,
+            window is null ? null : StaticFrameEvidence.FromCallback(window, callbackUtc, device.Options)));
         logger.LogInformation("扫描已接纳指令后的完整场: workflowId={WorkflowId}, camera={Camera}, 点数={Count}",
             workflowId, device.Camera, finite);
     }

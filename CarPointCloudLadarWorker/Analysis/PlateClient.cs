@@ -17,15 +17,7 @@ public sealed class PlateClient(HttpClient http, IOptions<LadarCaptureOptions> o
         if (!_options.EnableApiRequests || !_options.FetchLicensePlateOnCapture)
             return string.IsNullOrWhiteSpace(_options.LicensePlate) ? null : _options.LicensePlate;
 
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-        using var request = new HttpRequestMessage(HttpMethod.Get,
-            $"{_options.WebApiUrl.TrimEnd('/')}/api/v1/vehicleWorkflows/{Uri.EscapeDataString(workflowId)}/licensePlate");
-        request.Headers.Add("Timestamp", timestamp);
-        request.Headers.Add("Signature", Convert.ToHexString(
-            MD5.HashData(Encoding.UTF8.GetBytes(timestamp + _options.AppSecret))).ToLowerInvariant());
-        request.Headers.Add("X-Interaction-Id", Guid.NewGuid().ToString("N"));
-        request.Headers.Add("X-Caller-System", "Worker");
-        request.Headers.Add("X-Workflow-Id", workflowId);
+        using var request = WorkflowRequest.Create(_options, HttpMethod.Get, workflowId, "licensePlate");
 
         try
         {
@@ -45,5 +37,22 @@ public sealed class PlateClient(HttpClient http, IOptions<LadarCaptureOptions> o
                 workflowId, error.GetType().Name);
             return null;
         }
+    }
+}
+
+internal static class WorkflowRequest
+{
+    internal static HttpRequestMessage Create(LadarCaptureOptions options, HttpMethod method, string workflowId, string action)
+    {
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var request = new HttpRequestMessage(method,
+            $"{options.WebApiUrl.TrimEnd('/')}/api/v1/vehicleWorkflows/{Uri.EscapeDataString(workflowId)}/{action}");
+        request.Headers.Add("Timestamp", timestamp);
+        request.Headers.Add("Signature", Convert.ToHexString(
+            MD5.HashData(Encoding.UTF8.GetBytes(timestamp + options.AppSecret))).ToLowerInvariant());
+        request.Headers.Add("X-Interaction-Id", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("X-Caller-System", "Worker");
+        request.Headers.Add("X-Workflow-Id", workflowId);
+        return request;
     }
 }

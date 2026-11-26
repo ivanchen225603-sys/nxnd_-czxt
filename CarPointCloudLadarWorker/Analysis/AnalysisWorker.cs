@@ -17,12 +17,15 @@ public sealed class AnalysisWorker(
     AnalysisTaskStore tasks,
     IOptions<LadarCaptureOptions> options,
     TimeProvider time,
-    ILogger<AnalysisWorker> logger) : BackgroundService
+    ILogger<AnalysisWorker> logger,
+    StaticEvidenceClient? evidence = null) : BackgroundService
 {
     private const int MaxRetainedWorkflows = 200;
 
     private readonly LadarCaptureOptions _options = options.Value;
     private readonly Channel<AnalysisTask> _queue = Channel.CreateUnbounded<AnalysisTask>();
+    private readonly Channel<AnalysisTask> _ready = Channel.CreateUnbounded<AnalysisTask>();
+    private readonly Channel<AnalysisTask> _pendingEvidence = Channel.CreateUnbounded<AnalysisTask>();
     private readonly object _gate = new();
     private readonly Dictionary<string, AnalysisRecord> _records = [];
     private readonly Queue<string> _order = new();
@@ -35,7 +38,8 @@ public sealed class AnalysisWorker(
         var record = new AnalysisRecord(
             pair.WorkflowId, pair.VehicleCaptureId, AnalysisStage.Queued, time.GetLocalNow().DateTime,
             pair.Primary.CameraIdentifier, pair.Secondary.CameraIdentifier, capturedAt,
-            [pair.Primary.PcdPath, pair.Secondary.PcdPath]);
+            [pair.Primary.PcdPath, pair.Secondary.PcdPath])
+        { StaticStatus = pair.Primary.StaticEvidence is null && pair.Secondary.StaticEvidence is null ? null : "pending" };
         var task = new AnalysisTask(pair, record, 0, null);
         Persist(task);
         _queue.Writer.TryWrite(task);
@@ -68,66 +72,127 @@ public sealed class AnalysisWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.AnalysisEnabled)
-            return;
+        if (!_options.AnalysisEnabled) return;
+        using var active = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var loops = Enumerable.Range(0, _options.MaxConcurrentAnalyses)
+            .Select(_ => AnalyzeAsync(active.Token)).Append(CheckEvidenceAsync(active.Token))
+            .Append(ScheduleAsync(active.Token)).ToArray();
+        // 若文件读写或调度发生致命错误，一起停止其他消费者，让宿主收到错误。
+        await Task.WhenAny(loops);
+        await active.CancelAsync();
+        await Task.WhenAll(loops);
+    }
 
-        await foreach (var queued in _queue.Reader.ReadAllAsync(stoppingToken))
+    private async Task ScheduleAsync(CancellationToken token)
+    {
+        var delayed = new PriorityQueue<AnalysisTask, DateTimeOffset>();
+        while (!token.IsCancellationRequested)
+        {
+            while (_queue.Reader.TryRead(out var incoming))
+            {
+                if (incoming.NextAttemptAt is { } due && due > time.GetUtcNow()) delayed.Enqueue(incoming, due);
+                else Dispatch(incoming);
+            }
+            while (delayed.TryPeek(out _, out var due) && due <= time.GetUtcNow()) Dispatch(delayed.Dequeue());
+
+            if (!delayed.TryPeek(out _, out var earliest))
+            {
+                await _queue.Reader.WaitToReadAsync(token);
+                continue;
+            }
+            var wait = earliest - time.GetUtcNow();
+            if (wait <= TimeSpan.Zero) continue;
+            using var alarm = new CancellationTokenSource(wait, time);
+            using var wake = CancellationTokenSource.CreateLinkedTokenSource(token, alarm.Token);
+            try { await _queue.Reader.WaitToReadAsync(wake.Token); }
+            catch (OperationCanceledException) when (alarm.IsCancellationRequested && !token.IsCancellationRequested) { }
+        }
+    }
+
+    private void Dispatch(AnalysisTask task)
+    {
+        var needsEvidence = task.Pair.Primary.StaticEvidence is not null || task.Pair.Secondary.StaticEvidence is not null;
+        var target = needsEvidence && task.Record.StaticStatus != "confirmed" ? _pendingEvidence : _ready;
+        target.Writer.TryWrite(task);
+    }
+
+    private async Task CheckEvidenceAsync(CancellationToken token)
+    {
+        await foreach (var task in _pendingEvidence.Reader.ReadAllAsync(token))
+        {
+            var decision = evidence is null ? new StaticDecision("insufficient", "静态确认服务未配置") :
+                await evidence.CheckAsync(task.Pair, token);
+            var captured = task.Pair.Primary.StaticEvidence ?? task.Pair.Secondary.StaticEvidence!;
+            var deadline = captured.Window.CaptureUntil.AddSeconds(30);
+            var now = time.GetUtcNow();
+            if (decision.Status == "pending" && now >= deadline)
+                decision = new("insufficient", $"静态确认超时：{decision.Reason ?? "证据未覆盖两路扫描"}");
+            var terminal = decision.Status is "rejected" or "insufficient";
+            var record = task.Record with
+            {
+                Stage = terminal ? AnalysisStage.Failed : AnalysisStage.Queued, StaticStatus = decision.Status,
+                StaticReason = decision.Reason, Error = terminal ? $"静态未确认：{decision.Reason ?? decision.Status}" : null,
+                UpdatedAt = time.GetLocalNow().DateTime
+            };
+            var retryAt = now.AddSeconds(1);
+            var next = task with { Record = record, NextAttemptAt = decision.Status == "pending" ?
+                (retryAt < deadline ? retryAt : deadline) : null };
+            Persist(next);
+            if (task.Record.StaticStatus != decision.Status || task.Record.StaticReason != decision.Reason)
+                logger.LogInformation("扫描静态确认 workflowId={WorkflowId} pairId={PairId} status={Status} reason={Reason}",
+                    record.WorkflowId, record.PairId, decision.Status, decision.Reason);
+            if (!terminal) _queue.Writer.TryWrite(next);
+        }
+    }
+
+    private async Task AnalyzeAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var queued in _ready.Reader.ReadAllAsync(stoppingToken))
         {
             var task = queued;
-            do
+            var record = task.Record with
             {
-                if (task.NextAttemptAt is { } next)
-                {
-                    var delay = next - time.GetUtcNow();
-                    if (delay > TimeSpan.Zero)
-                        await Task.Delay(delay, time, stoppingToken);
-                }
-                stoppingToken.ThrowIfCancellationRequested();
-
-                var record = task.Record with
-                {
-                    Stage = AnalysisStage.Analyzing,
-                    Error = null,
-                    UpdatedAt = time.GetLocalNow().DateTime
-                };
-                task = task with { Record = record, NextAttemptAt = null };
-                Persist(task);
-                var startedAt = DateTime.Now;
-                var stage = "plate";
-                var stageTimer = Stopwatch.StartNew();
-                try
-                {
-                    var plate = await plates.FetchAsync(task.Pair.WorkflowId, stoppingToken);
-                    logger.LogInformation("Worker分析阶段 workflowId={WorkflowId} pairId={PairId} stage=plate elapsedMs={ElapsedMs}",
-                        task.Pair.WorkflowId, task.Pair.VehicleCaptureId, stageTimer.ElapsedMilliseconds);
-                    stage = "analyzer-http";
-                    stageTimer.Restart();
-                    record = await analyzer.AnalyzePairAsync(record, task.Pair, plate, stoppingToken);
-                }
-                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
-                {
-                    // 只处理本次调用失败；停机取消保留 analyzing，重启后继续。
-                    record = record with { Stage = AnalysisStage.Failed, Error = ex.Message };
-                }
-                logger.LogInformation("Worker分析阶段 workflowId={WorkflowId} pairId={PairId} stage={Stage} elapsedMs={ElapsedMs} result={Result}",
-                    task.Pair.WorkflowId, task.Pair.VehicleCaptureId, stage, stageTimer.ElapsedMilliseconds, record.Stage);
-
-                if (record.Stage == AnalysisStage.Failed)
-                {
-                    task = task with { FailureCount = task.FailureCount + 1 };
-                    if (task.FailureCount <= _options.AnalysisRetryCount)
-                    {
-                        record = record with { Stage = AnalysisStage.Queued };
-                        task = task with { NextAttemptAt = time.GetUtcNow().AddSeconds(_options.AnalysisRetryDelaySeconds) };
-                        logger.LogWarning("分析失败，等待重试: workflowId={WorkflowId}, 失败次数={Failures}, 下次调用={NextAttemptAt}, error={Error}",
-                            task.Pair.WorkflowId, task.FailureCount, task.NextAttemptAt, record.Error);
-                    }
-                }
-                task = task with { Record = record with { UpdatedAt = time.GetLocalNow().DateTime } };
-                Persist(task);
-                LogTiming(task.Pair, startedAt, record);
+                Stage = AnalysisStage.Analyzing,
+                Error = null,
+                UpdatedAt = time.GetLocalNow().DateTime
+            };
+            task = task with { Record = record, NextAttemptAt = null };
+            Persist(task);
+            var startedAt = DateTime.Now;
+            var stage = "plate";
+            var stageTimer = Stopwatch.StartNew();
+            try
+            {
+                var plate = await plates.FetchAsync(task.Pair.WorkflowId, stoppingToken);
+                logger.LogInformation("Worker分析阶段 workflowId={WorkflowId} pairId={PairId} stage=plate elapsedMs={ElapsedMs}",
+                    task.Pair.WorkflowId, task.Pair.VehicleCaptureId, stageTimer.ElapsedMilliseconds);
+                stage = "analyzer-http";
+                stageTimer.Restart();
+                record = await analyzer.AnalyzePairAsync(record, task.Pair, plate, stoppingToken);
             }
-            while (task.Record.Stage == AnalysisStage.Queued);
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                // 只处理本次调用失败；停机取消保留 analyzing，重启后继续。
+                record = record with { Stage = AnalysisStage.Failed, Error = ex.Message };
+            }
+            logger.LogInformation("Worker分析阶段 workflowId={WorkflowId} pairId={PairId} stage={Stage} elapsedMs={ElapsedMs} result={Result}",
+                task.Pair.WorkflowId, task.Pair.VehicleCaptureId, stage, stageTimer.ElapsedMilliseconds, record.Stage);
+
+            if (record.Stage == AnalysisStage.Failed)
+            {
+                task = task with { FailureCount = task.FailureCount + 1 };
+                if (task.FailureCount <= _options.AnalysisRetryCount)
+                {
+                    record = record with { Stage = AnalysisStage.Queued };
+                    task = task with { NextAttemptAt = time.GetUtcNow().AddSeconds(_options.AnalysisRetryDelaySeconds) };
+                    logger.LogWarning("分析失败，等待重试: workflowId={WorkflowId}, 失败次数={Failures}, 下次调用={NextAttemptAt}, error={Error}",
+                        task.Pair.WorkflowId, task.FailureCount, task.NextAttemptAt, record.Error);
+                }
+            }
+            task = task with { Record = record with { UpdatedAt = time.GetLocalNow().DateTime } };
+            Persist(task);
+            LogTiming(task.Pair, startedAt, record);
+            if (task.Record.Stage == AnalysisStage.Queued) _queue.Writer.TryWrite(task);
         }
     }
 

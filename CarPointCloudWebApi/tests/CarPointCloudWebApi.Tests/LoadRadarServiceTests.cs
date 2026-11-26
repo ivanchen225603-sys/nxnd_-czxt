@@ -1026,6 +1026,8 @@ public sealed class LoadRadarServiceTests : IDisposable
         public readonly Dictionary<string, VehicleArrivalRecord> Arrivals = [];
         public bool FailAfterArrival;
         public override VehicleArrivalRecord? FindVehicleArrivalByEventId(string eventId) => Arrivals.GetValueOrDefault(eventId);
+        public override bool TryClaimStaticScan(long recordId, string workflowId, DateTime updatedAt, StaticCapture gate) =>
+            TryClaimVehicleArrivalAutoScan(recordId, updatedAt);
         public override bool TryClaimVehicleArrivalAutoScan(long recordId, DateTime updatedAt)
         {
             var arrival = Arrivals.Values.Single(a => a.Id == recordId);

@@ -49,6 +49,12 @@ public sealed class LadarCaptureOptions
     /// <summary>首次失败后的重试次数；默认 2，即正常情况下最多调用 3 次。</summary>
     public int AnalysisRetryCount { get; set; } = 2;
 
+    /// <summary>同时调用 Analyzer 的任务数。默认逐车执行；等待重试或静态确认不占此名额。</summary>
+    public int MaxConcurrentAnalyses { get; set; } = 1;
+
+    /// <summary>现场标称完整场周期，仅用于自动采集时间预算告警。</summary>
+    public double? ExpectedFrameCycleSeconds { get; set; }
+
     /// <summary>失败后固定等待的秒数。</summary>
     public int AnalysisRetryDelaySeconds { get; set; } = 10;
 
@@ -135,6 +141,8 @@ public sealed class LadarCaptureOptions
             throw new InvalidOperationException("LadarCapture:CaptureDirectory 不能为空");
         if (AnalysisRetryCount < 0 || AnalysisRetryDelaySeconds < 0)
             throw new InvalidOperationException("LadarCapture:AnalysisRetryCount 和 AnalysisRetryDelaySeconds 不能小于 0");
+        if (MaxConcurrentAnalyses is < 1 or > 4)
+            throw new InvalidOperationException("LadarCapture:MaxConcurrentAnalyses 必须在 1 到 4 之间");
         if (CaptureCleanupDailyAt.Length > 0)
             TimeOnly.ParseExact(CaptureCleanupDailyAt, "HH:mm");
     }
@@ -157,4 +165,13 @@ public sealed class LadarDeviceOptions
 
     /// <summary>有限点数低于该值的场不作为边界或业务帧。</summary>
     public int MinValidFramePointCount { get; set; } = 5000;
+
+    /// <summary>现场验证的一场扫描最大时长；空表示尚无证据，单位毫秒。</summary>
+    public int? VerifiedMaxScanDurationMs { get; set; }
+
+    /// <summary>现场验证的场结束到 SDK 回调取时的最大延迟，单位毫秒。</summary>
+    public int? VerifiedMaxCallbackDelayMs { get; set; }
+
+    /// <summary>与停稳观测时基之间已验证的总误差上限，含跨机时钟差，单位毫秒。</summary>
+    public int? VerifiedClockUncertaintyMs { get; set; }
 }

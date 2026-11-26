@@ -40,6 +40,8 @@ public partial class IntegrationRepository : IIntegrationRepository
     private readonly int _captureLeadSeconds;
     private readonly int _captureWindowSeconds;
     private readonly int _captureSkewSeconds;
+    private readonly VerifiedPlateCalibration _verifiedPlateCalibration;
+    private readonly VerifiedPlateOffsetBounds _verifiedPlateOffsetBounds;
     private readonly ILogger<IntegrationRepository>? _logger;
 
     /// <summary>创建承载第三方集成、点云结果和来车流程持久化的达梦仓储。</summary>
@@ -55,6 +57,8 @@ public partial class IntegrationRepository : IIntegrationRepository
         _captureLeadSeconds = Math.Clamp(configuration.GetValue("PlateAcquisition:CaptureLeadToleranceSeconds", 5), 0, 60);
         _captureWindowSeconds = Math.Clamp(configuration.GetValue("PlateAcquisition:DeadlineSeconds", 30), 1, 30);
         _captureSkewSeconds = Math.Clamp(configuration.GetValue("PlateAcquisition:ClockSkewToleranceSeconds", 5), 1, 60);
+        _verifiedPlateCalibration = VerifiedPlateCalibration.Read(configuration, logger);
+        _verifiedPlateOffsetBounds = VerifiedPlateOffsetBounds.Read(configuration, logger);
 
         if (string.IsNullOrWhiteSpace(_connectionString))
         {

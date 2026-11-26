@@ -10,9 +10,9 @@ public static class RadarScanDispatcher
         long arrivalId,
         string workflowId,
         CancellationToken cancellationToken,
-        DateTimeOffset? captureUntil = null)
+        DateTimeOffset? captureUntil = null, string? segmentId = null)
     {
-        var response = await radarClient.StartScanAsync(workflowId, cancellationToken, captureUntil);
+        var response = await radarClient.StartScanAsync(workflowId, cancellationToken, captureUntil, segmentId);
         repository.UpdateVehicleArrivalRadarResult(
             arrivalId,
             response.IsSuccess ? VehicleArrivalRadarStatus.Succeeded : VehicleArrivalRadarStatus.Failed,

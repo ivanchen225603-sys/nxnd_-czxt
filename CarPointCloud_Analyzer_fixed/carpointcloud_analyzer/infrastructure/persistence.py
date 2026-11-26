@@ -30,6 +30,10 @@ _ONE_DECIMAL = Decimal("0.1")
 logger = logging.getLogger(__name__)
 
 
+class _ConcurrentFirstProfile(Exception):
+    """另一车次在当前事务首次建档时已提交同牌档案。"""
+
+
 @dataclass(frozen=True)
 class Dm8Settings:
     """Analyzer 直连达梦 DM8 所需的环境配置。"""
@@ -116,6 +120,17 @@ class Dm8DimensionStore:
         return self._persist(payload, empty_profile, wait_for_plate=True)
 
     def _persist(
+        self, payload: Mapping[str, Any], empty_profile: Mapping[str, Any] | None,
+        *, wait_for_plate: bool,
+    ) -> PersistResult | Literal["pending", "unidentified"]:
+        try:
+            return self._persist_once(payload, empty_profile, wait_for_plate=wait_for_plate)
+        except _ConcurrentFirstProfile:
+            # 首次插入返回唯一冲突时，竞争者已提交。新事务重读档案并按采集时刻比较，
+            # 同时重写刚刚回滚的本车尺寸、拉筋明细；重试一次，其他错误原样上抛。
+            return self._persist_once(payload, empty_profile, wait_for_plate=wait_for_plate)
+
+    def _persist_once(
         self, payload: Mapping[str, Any], empty_profile: Mapping[str, Any] | None,
         *, wait_for_plate: bool,
     ) -> PersistResult | Literal["pending", "unidentified"]:
@@ -372,6 +387,10 @@ class Dm8DimensionStore:
                     dimensions["trailerBottomToGroundHeight"],
                     dimensions["highLowPlateHeight"], now, now,
                 )
+            except Exception as exc:
+                if any(getattr(detail, "code", None) == -6602 for detail in exc.args):
+                    raise _ConcurrentFirstProfile(record["licensePlate"]) from exc
+                raise
             finally:
                 cursor.close()
         elif should_update:

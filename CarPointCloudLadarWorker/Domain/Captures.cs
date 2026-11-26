@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Ladarclr;
+using CarPointCloudLadarWorker.Config;
 
 namespace CarPointCloudLadarWorker.Domain;
 
@@ -18,14 +19,36 @@ public sealed record PointCloudFrame(
     string CameraIdentifier,
     string Source,
     DateTime CapturedAt,
-    string WorkflowId);
+    string WorkflowId,
+    StaticFrameEvidence? StaticEvidence = null);
 
 /// <summary>已落盘的一份 PCD。</summary>
 public sealed record PcdCapture(
     string PcdPath,
     string CameraIdentifier,
     DateTime CapturedAt,
-    string WorkflowId);
+    string WorkflowId,
+    StaticFrameEvidence? StaticEvidence = null);
+
+/// <summary>WebApi 自动派发时绑定的停稳段；旧版自动指令缺少段编号，只可保留诊断点云。</summary>
+public sealed record StaticCaptureWindow(string? SegmentId, DateTimeOffset CaptureUntil);
+
+/// <summary>以设备实测上界标记完整扫描可能覆盖的最大时间区间。</summary>
+public sealed record StaticFrameEvidence(StaticCaptureWindow Window, DateTimeOffset CallbackUtc,
+    DateTimeOffset? ScanStartUtc, DateTimeOffset? ScanEndUtc)
+{
+    public static StaticFrameEvidence FromCallback(StaticCaptureWindow window, DateTimeOffset callbackUtc,
+        LadarDeviceOptions device)
+    {
+        if (device.VerifiedMaxScanDurationMs is not > 0 || device.VerifiedMaxCallbackDelayMs is not >= 0 ||
+            device.VerifiedClockUncertaintyMs is not >= 0)
+            return new(window, callbackUtc, null, null);
+
+        var uncertainty = device.VerifiedClockUncertaintyMs.Value;
+        var before = (long)device.VerifiedMaxScanDurationMs.Value + device.VerifiedMaxCallbackDelayMs.Value + uncertainty;
+        return new(window, callbackUtc, callbackUtc.AddMilliseconds(-before), callbackUtc.AddMilliseconds(uncertainty));
+    }
+}
 
 /// <summary>同一扫描会话中两台雷达的 PCD；Primary 恒为 Devices[0]（A）。</summary>
 public sealed record PairedPcdCapture(

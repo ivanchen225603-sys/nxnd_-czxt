@@ -27,6 +27,8 @@ public static class LoadRadarRegistration
         services.AddScoped<LoadRadarStandstillService>();
         services.AddScoped<LoadRadarPublicationProcessor>();
         services.AddHostedService<LoadRadarPublicationWorker>();
+        if (configuration.GetValue<bool>("LoadRadar:Enabled") && configuration.GetValue("Database:Enabled", true))
+            services.AddHostedService<StaticCaptureExpiryWorker>();
         return services;
     }
 }

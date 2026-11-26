@@ -31,6 +31,8 @@ public sealed record AnalysisRecord(
     /// <summary>本次计算的厘米业务载荷；与数据库是否已保存分开保留。</summary>
     public JsonObject? DimensionPayload { get; init; }
     public bool HasDimensionPayload { get; init; }
+    public string? StaticStatus { get; init; }
+    public string? StaticReason { get; init; }
     public string? Error { get; init; }
 
     /// <summary>重试等待使用 Queued，重试耗尽才发布 Failed 终局。</summary>

@@ -70,6 +70,8 @@ internal static class ApiResponses
         persistence = r.Persistence,
         dimensionPayload = r.DimensionPayload,
         hasDimensionPayload = r.HasDimensionPayload,
+        staticStatus = r.StaticStatus,
+        staticReason = r.StaticReason,
         error = r.Error,
         permanentFailure = r.PermanentFailure
     };

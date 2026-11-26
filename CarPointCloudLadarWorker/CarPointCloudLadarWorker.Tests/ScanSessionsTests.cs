@@ -1,3 +1,5 @@
+using StaticDomain = CarPointCloudWebApi.Domain;
+
 namespace CarPointCloudLadarWorker.Tests;
 
 public sealed class ScanSessionsTests
@@ -101,6 +103,72 @@ public sealed class ScanSessionsTests
         Assert.Null(Frame(sessions, "CAM_004", points: 99));
         Assert.Null(Frame(sessions, "CAM_004"));   // 第一份合格场才是边界
         Assert.Equal("wf-1", Frame(sessions, "CAM_004"));
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public void FifteenSecondDeliveryGuardOnlyAllowsEarlyCandidatesForVerifiedStandstill(
+        bool hasDeadline, bool hasSegment, bool signed)
+    {
+        var sessions = Create(o => o.MaximumFrameDeliveryDelayMilliseconds = 15000);
+        var before = _time.GetTimestamp();
+        _time.AdvanceMilliseconds(1);
+        var started = sessions.Start("wf", hasDeadline ? _time.GetUtcNow().AddSeconds(10) : null,
+            hasSegment ? "seg" : null, verifiedStandstillDispatch: signed);
+        Assert.True(started.Started);
+        foreach (var camera in new[] { "CAM_004", "CAM_005" })
+            Assert.Null(sessions.Offer(camera, 1000, before));
+        _time.AdvanceSeconds(4);
+        foreach (var camera in new[] { "CAM_004", "CAM_005" })
+            Assert.Null(sessions.Offer(camera, 1000, _time.GetTimestamp())); // 两路均须丢边界场。
+        _time.AdvanceSeconds(4);
+        foreach (var camera in new[] { "CAM_004", "CAM_005" })
+        {
+            Assert.Equal(signed ? "wf" : null, sessions.Offer(camera, 1000, _time.GetTimestamp(), out var window));
+            Assert.Equal(signed ? "seg" : null, window?.SegmentId);
+        }
+        _time.AdvanceSeconds(2);
+        if (signed) Assert.Equal(ScanOutcome.Completed, sessions.Snapshot().Outcome);
+        else if (hasDeadline) Assert.Equal(ScanOutcome.TimedOut, sessions.Snapshot().Outcome);
+        else
+        {
+            Assert.Equal(ScanOutcome.InProgress, sessions.Snapshot().Outcome);
+            Assert.Null(Frame(sessions, "CAM_004", afterSeconds: 5)); // 人工保护窗到期，才开始丢边界场。
+            Assert.Equal("wf", Frame(sessions, "CAM_004"));
+        }
+    }
+
+    [Theory]
+    [InlineData(7, "rejected")]
+    [InlineData(10, "confirmed")]
+    public void VerifiedEarlyFramesStillNeedWebApiProofCoveringTheEighthSecond(int movedAt, string decision)
+    {
+        var sessions = Create(o => o.MaximumFrameDeliveryDelayMilliseconds = 15000);
+        var stop = _time.GetUtcNow();
+        var until = stop.AddSeconds(10);
+        var gate = new StaticDomain.StaticCapture { PrimaryCamera = "CAM_004", SegmentId = "seg",
+            StoppedAt = stop, CaptureUntil = until };
+        sessions.Start("wf", until, "seg", verifiedStandstillDispatch: true);
+        _time.AdvanceSeconds(4);
+        foreach (var camera in new[] { "CAM_004", "CAM_005" })
+            Assert.Null(sessions.Offer(camera, 1000, _time.GetTimestamp()));
+        _time.AdvanceSeconds(4);
+        StaticDomain.ScanInterval Next(string camera)
+        {
+            Assert.Equal("wf", sessions.Offer(camera, 1000, _time.GetTimestamp(), out var window));
+            var frame = StaticFrameEvidence.FromCallback(window!, _time.GetUtcNow(), new LadarDeviceOptions {
+                VerifiedMaxScanDurationMs = 4000, VerifiedMaxCallbackDelayMs = 50, VerifiedClockUncertaintyMs = 10 });
+            return new(camera, frame.CallbackUtc, frame.ScanStartUtc, frame.ScanEndUtc);
+        }
+        gate.Offer(new("pair", "seg", Next("CAM_004"), Next("CAM_005")), _time.GetUtcNow());
+        Assert.Equal("pending", gate.Decision.Status);
+        _time.AdvanceSeconds(2);
+        gate.Observe(new("node", "CH4", "wf", "seg", 1, stop, stop.AddSeconds(movedAt - 0.2),
+            stop.AddSeconds(movedAt), "movement"), _time.GetUtcNow());
+        Assert.Equal(decision, gate.Decision.Status);
     }
 
     [Fact]

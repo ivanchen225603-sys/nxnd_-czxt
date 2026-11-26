@@ -53,6 +53,9 @@ public interface IIntegrationRepository
 
     void InsertLicensePlateRecord(LicensePlateRecord record);
 
+    /// <summary>记录所有有效候选在本机的首次可见时刻，独立于是否绑定车次。</summary>
+    void ObservePartnerCaptures(string camera, IReadOnlyList<PartnerLicensePlateData> candidates, DateTime receivedAt);
+
     /// <summary>读取 workflow 已成功绑定的权威车牌；未完成或不存在时返回 null。</summary>
     string? GetSucceededWorkflowLicensePlate(string workflowId) => null;
 
@@ -153,4 +156,9 @@ public interface IIntegrationRepository
     /// <summary>CH4 停稳自动触发：仅当雷达状态仍为 NOT_REQUIRED 时置为 PENDING，同一车次只能成功一次。</summary>
     /// <remarks>不复用 <see cref="TryClaimVehicleArrivalRadarProcessing"/>：它允许 FAILED/超时 PENDING 重新占用，会变成自动补扫。</remarks>
     bool TryClaimVehicleArrivalAutoScan(long recordId, DateTime updatedAt) => false;
+    bool TryClaimStaticScan(long recordId, string workflowId, DateTime updatedAt, StaticCapture gate) =>
+        throw new InvalidOperationException("自动采集需要持久化静态证据");
+    StaticDecision UpdateStaticScan(string workflowId, Action<StaticCapture> update) =>
+        throw new InvalidOperationException("未配置静态证据存储");
+    void ExpireStaticScans(DateTimeOffset now) => throw new InvalidOperationException("未配置静态证据存储");
 }

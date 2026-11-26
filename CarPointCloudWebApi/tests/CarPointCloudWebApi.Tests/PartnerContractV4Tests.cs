@@ -157,14 +157,17 @@ public class PartnerContractV4Tests
         }
     }
 
-    [Fact]
-    public async Task PartnerClient_StopsAtThreeAttemptsWhenConfiguredHigher()
+    [Theory]
+    [InlineData(99, 3)]
+    [InlineData(2, 2)]
+    [InlineData(0, 1)]
+    public async Task PartnerClient_UsesTheConfiguredTotalWithinContractLimits(int configured, int expected)
     {
         using var handler = new PartnerHandler("{\"code\":200,\"message\":\"success\",\"data\":[]}");
         using var http = new HttpClient(handler);
-        var client = Client(http, 99);
+        var client = Client(http, configured);
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetLicensePlateAsync("CAM_001"));
-        Assert.Equal(3, handler.Calls);
+        Assert.Equal(expected, handler.Calls);
     }
 
     private static PartnerLicensePlateClient Client(HttpClient http, int attempts, int timeoutMs = 3000) => new(http,
@@ -187,6 +190,44 @@ public class PartnerContractV4Tests
         using var http = new HttpClient(handler);
         await Assert.ThrowsAsync<ArgumentException>(() => Client(http, 1).GetLicensePlateAsync(" CAM_001"));
         Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PartnerClient_reads_field_response_for_direct_and_workflow_queries(bool direct)
+    {
+        using var handler = new PartnerHandler("""
+            {"success":true,"msg":"ok","data":[
+              {"CAMERAID":"CAM_004","LICENSEPLATE":"宁A25771","CAPTURETIME":"2026-11-26 10:00:10","ENTERID":123456789012345678901234},
+              {"CAMERAID":"CAM_004","LICENSEPLATE":"宁A12346","CAPTURETIME":"2026-11-26 09:59:10","ENTERID":"000045"},
+              {"CAMERAID":"CAM_003","LICENSEPLATE":"宁A12344","CAPTURETIME":"2026-11-26 10:00:11","ENTERID":98765}]}
+            """);
+        using var http = new HttpClient(handler);
+        var client = Client(http, 1);
+        var items = direct ? await client.GetLicensePlateAsync("CAM_004") :
+            await client.GetLicensePlateSnapshotForWorkflowAsync("CAM_004", "wf", "int", 1, default);
+
+        Assert.Equal(new[] { "123456789012345678901234", "000045" }, items.Select(i => i.EnterId));
+        Assert.All(items, item => Assert.NotNull(item.FirstSeenAt));
+        using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(items));
+        Assert.Equal("123456789012345678901234", encoded.RootElement[0].GetProperty("enterID").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("{\"success\":false,\"data\":[]}")]
+    [InlineData("{\"success\":true,\"code\":500,\"data\":[]}")]
+    [InlineData("{\"success\":false,\"code\":200,\"data\":[]}")]
+    [InlineData("{\"success\":true,\"code\":null,\"data\":[]}")]
+    [InlineData("{\"success\":\"true\",\"data\":[]}")]
+    [InlineData("{\"data\":[]}")]
+    public async Task PartnerClient_rejects_missing_or_conflicting_business_status(string body)
+    {
+        using var http = new HttpClient(new PartnerHandler(body));
+        var client = Client(http, 1);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.GetLicensePlateSnapshotForWorkflowAsync("CAM_004", "wf", "int", 1, default));
     }
 
     [Fact]

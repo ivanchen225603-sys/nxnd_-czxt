@@ -28,6 +28,8 @@ public static class WorkerComposition
         services.AddHttpClient<AnalyzerClient>(c => c.Timeout = TimeSpan.FromSeconds(options.AnalyzerTimeoutSeconds))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { UseProxy = false });
         services.AddHttpClient<PlateClient>(c => c.Timeout = TimeSpan.FromSeconds(options.LicensePlateFetchTimeoutSeconds));
+        services.AddHttpClient<StaticEvidenceClient>(c => c.Timeout = TimeSpan.FromSeconds(3))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { UseProxy = false });
 
         // 先恢复分析任务，再启动采集；停止时反序，先停雷达和采集，最后停分析。
         AddHostedSingleton<AnalysisWorker>(services);

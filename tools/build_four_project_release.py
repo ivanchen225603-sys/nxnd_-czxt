@@ -204,7 +204,8 @@ def templates(snapshot: Path, package: Path, project: str) -> None:
                     CoordinateScale=1, LivePreviewMaxPointsPerCamera=12000,
                     CaptureCleanupDailyAt="03:00",
                     PermanentPointCloudDirectories=["/data/carpointcloud/empty-vehicle-profiles"])
-        for key in ("CaptureDirectory", "PairManifestDirectory", "AnalysisQueueDirectory",
+        opts["AnalysisTaskDirectory"] = ""
+        for key in ("CaptureDirectory", "PairManifestDirectory",
                     "UploadQueueDirectory", "HealthSnapshotDirectory", "AnalyzerBaselineDirectory"):
             opts[key] = "/data/carpointcloud/" + {"CaptureDirectory": "captures", "AnalyzerBaselineDirectory": "baselines"}.get(key, "worker-state/" + key)
         opts["DualRadarExtrinsicPath"] = "/data/carpointcloud/extrinsics/RETAIN-VERIFIED-EXTRINSIC.json"
@@ -294,10 +295,11 @@ def assemble(output: Path, version: str, assets: Path, sdk: Path) -> dict:
                 database.mkdir()
                 for name in ("load_radar_20260917.sql", "load_radar_passage_start_20260918.sql",
                              "load_radar_publication_20260918.sql", "partner_contract_v4_20261012.sql",
-                             "async_plate_checkpoint_20261022.sql", "load_radar_volume_revision_20261102.sql"):
+                             "async_plate_checkpoint_20261022.sql", "load_radar_volume_revision_20261102.sql",
+                             "partner_plate_observations_20261126.sql", "static_capture_evidence_20261126.sql"):
                     shutil.copy2(snapshot / project / "Sql" / name, database / name)
                 write(database / "README.txt", "仅供人工核对增量顺序；先备份和核对已执行迁移，再执行缺失项。\n"
-                      "本次CH4当天复算新增load_radar_volume_revision_20261102.sql；没有自动执行入口。\n")
+                      "识牌首次观测与 CH4 静态采集需要两份 20261126 增量脚本。\n")
         else:
             copy_tree(assets / "runtime", package / "runtime")
             (package / "wheelhouse").mkdir()

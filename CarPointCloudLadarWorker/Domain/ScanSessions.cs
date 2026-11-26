@@ -53,7 +53,8 @@ public sealed record ScanCommandResult(
 /// 持续扫描 + 软件门禁：雷达一直出场，只有收到扫描指令后才接纳点云。
 /// </summary>
 /// <remarks>
-/// 指令到达后，每台雷达忽略交付延迟窗内回调的场，再丢弃
+/// 人工及旧指令先忽略交付延迟窗内的回调。已验证的自动停稳派发可在此窗内留存原始点云，
+/// 最终尺寸须取得两路完整场的静止证据。每路仍先丢弃
 /// <see cref="LadarCaptureOptions.DiscardCompleteCyclesAfterCommand"/> 份跨越指令边界的合格场，
 /// 然后接纳下一份合格场。两台各接纳一份即完成；超过超时仍未收齐即 timedout。
 /// 同一时刻只有一个会话；requestId 即 workflowId，重复提交返回原会话。
@@ -72,6 +73,7 @@ public sealed class ScanSessions
     private readonly int _discards;
     private readonly double _guardSeconds;
     private readonly double _timeoutSeconds;
+    private readonly double? _expectedCycleSeconds;
     private readonly Dictionary<string, Session> _byRequest = new(StringComparer.Ordinal);
     private readonly Queue<string> _requestOrder = new();
     private Session? _current;
@@ -86,10 +88,12 @@ public sealed class ScanSessions
         _discards = o.DiscardCompleteCyclesAfterCommand;
         _guardSeconds = (o.MaximumFrameDeliveryDelayMilliseconds ?? 0) / 1000.0;
         _timeoutSeconds = o.ScanOnceTimeoutSeconds;
+        _expectedCycleSeconds = o.ExpectedFrameCycleSeconds;
     }
 
     /// <summary>开始一次扫描；requestId 为空时自动生成。</summary>
-    public ScanCommandResult Start(string? requestId, DateTimeOffset? captureUntil = null)
+    public ScanCommandResult Start(string? requestId, DateTimeOffset? captureUntil = null, string? segmentId = null,
+        bool verifiedStandstillDispatch = false)
     {
         var id = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId.Trim();
         lock (_gate)
@@ -99,17 +103,32 @@ public sealed class ScanSessions
                 return ResultLocked(false, false, false, "invalid_request_id",
                     $"requestId 必须是 1-{MaxRequestIdLength} 个非控制字符（与 Analyzer 的 workflowId 契约一致）", _current);
             if (_byRequest.TryGetValue(id, out var existing))
+            {
+                if (!existing.ClosedByDeparture && captureUntil is { } requestedDeadline &&
+                    existing.StaticWindow != new StaticCaptureWindow(segmentId, requestedDeadline))
+                    return ResultLocked(false, false, false, "capture_context_mismatch", "同一流程的停稳段或截止时间不一致", existing);
                 return existing.ClosedByDeparture
                     ? ResultLocked(false, false, true, "vehicle_departed", "本车次已经离场", existing)
                     : ResultLocked(true, false, true, "existing",
                         "相同 requestId 已存在，返回原会话而不重复开启扫描", existing);
+            }
             var remaining = captureUntil - _time.GetUtcNow();
-            if (remaining <= TimeSpan.Zero || remaining > TimeSpan.FromSeconds(30))
+            if ((segmentId is not null && captureUntil is null) ||
+                remaining <= TimeSpan.Zero || remaining > TimeSpan.FromSeconds(30))
                 return ResultLocked(false, false, false, "capture_window_closed", "本车次自动采集窗口无效或已结束", null);
             if (_current?.Outcome == ScanOutcome.InProgress)
                 return ResultLocked(false, false, false, "busy", "已有单次扫描会话正在执行", _current);
 
             _current = NewSession(id, Math.Min(_timeoutSeconds, remaining?.TotalSeconds ?? _timeoutSeconds));
+            if (captureUntil is { } deadline)
+            {
+                _current.StaticWindow = new(segmentId, deadline);
+                _current.EarlyStaticCapture = verifiedStandstillDispatch && !string.IsNullOrWhiteSpace(segmentId);
+                var guard = _current.EarlyStaticCapture ? 0 : _guardSeconds;
+                if (_expectedCycleSeconds is > 0 && guard + (_discards + 1) * _expectedCycleSeconds >= _current.TimeoutSeconds)
+                    _logger.LogWarning("自动采集余量紧张 workflowId={WorkflowId} 可用秒={Window} 交付保护秒={Guard} 标称周期秒={Cycle} 丢场数={Discards}",
+                        id, _current.TimeoutSeconds, guard, _expectedCycleSeconds, _discards);
+            }
             RememberLocked(_current);
             return ResultLocked(true, true, false, "scanning",
                 $"扫描会话已创建，每台雷达将先丢弃 {_discards} 份完整场再采集", _current);
@@ -197,14 +216,19 @@ public sealed class ScanSessions
     /// </summary>
     /// <param name="callbackTimestamp">回调入口取得的单调时间戳，早于指令的场一律不计。</param>
     public string? Offer(string camera, int finitePointCount, long callbackTimestamp)
+        => Offer(camera, finitePointCount, callbackTimestamp, out _);
+
+    public string? Offer(string camera, int finitePointCount, long callbackTimestamp, out StaticCaptureWindow? window)
     {
         lock (_gate)
         {
+            window = null;
             ExpireLocked();
             var session = _current;
             if (session?.Outcome != ScanOutcome.InProgress || session.Captured.Contains(camera))
                 return null;
-            if (_time.GetElapsedTime(session.StartedTimestamp, callbackTimestamp).TotalSeconds < _guardSeconds)
+            var elapsed = _time.GetElapsedTime(session.StartedTimestamp, callbackTimestamp).TotalSeconds;
+            if (elapsed < 0 || (!session.EarlyStaticCapture && elapsed < _guardSeconds))
                 return null;
             if (finitePointCount < _minPoints[camera])
                 return null;
@@ -216,6 +240,10 @@ public sealed class ScanSessions
             }
 
             session.Captured.Add(camera);
+            window = session.StaticWindow;
+            if (session.EarlyStaticCapture && elapsed < _guardSeconds)
+                _logger.LogInformation("自动停稳采集保留交付保护窗内候选帧，须核对完整静止区间 workflowId={WorkflowId} segmentId={SegmentId} camera={Camera} elapsedSeconds={Elapsed} guardSeconds={Guard}",
+                    session.RequestId, window!.SegmentId, camera, elapsed, _guardSeconds);
             if (session.Captured.Count == _cameras.Length)
             {
                 session.Finish(ScanOutcome.Completed, null, _time.GetLocalNow().DateTime);
@@ -274,6 +302,8 @@ public sealed class ScanSessions
         public long StartedTimestamp { get; } = startedTimestamp;
         public double TimeoutSeconds { get; } = timeoutSeconds;
         public bool ClosedByDeparture { get; set; }
+        public bool EarlyStaticCapture { get; set; }
+        public StaticCaptureWindow? StaticWindow { get; set; }
         public Dictionary<string, int> RemainingDiscards { get; } = cameras.ToDictionary(x => x, _ => discards);
         public HashSet<string> Captured { get; } = [];
         public HashSet<string> Persisted { get; } = [];

@@ -30,6 +30,11 @@ public class NullIntegrationRepository : IIntegrationRepository
     {
     }
 
+    public virtual void ObservePartnerCaptures(string camera, IReadOnlyList<PartnerLicensePlateData> candidates, DateTime receivedAt)
+    {
+        foreach (var candidate in candidates) candidate.FirstSeenAt = receivedAt;
+    }
+
     /// <inheritdoc />
     public virtual string? GetSucceededWorkflowLicensePlate(string workflowId) => null;
 
@@ -120,4 +125,6 @@ public class NullIntegrationRepository : IIntegrationRepository
     {
         throw new InvalidOperationException("Vehicle-arrival persistence requires Database:Enabled=true.");
     }
+    public virtual bool TryClaimStaticScan(long recordId, string workflowId, DateTime updatedAt, StaticCapture gate) =>
+        throw new InvalidOperationException("自动采集需要持久化静态证据");
 }

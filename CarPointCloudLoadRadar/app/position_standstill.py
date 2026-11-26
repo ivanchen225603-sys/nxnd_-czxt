@@ -12,19 +12,24 @@
 
 门槛复用 config.detection.stationary_drift_m / stationary_min_sec，不新增配置。
 """
+from __future__ import annotations
 import math
 
 
 class PositionStandstill:
-    def __init__(self, drift_m: float, min_sec: float):
+    def __init__(self, drift_m: float, min_sec: float, max_gap_sec: float | None = None):
         self.drift_m = float(drift_m)
         self.min_sec = float(min_sec)
+        self.max_gap_sec = max_gap_sec
         self.reset()
 
     def reset(self) -> None:
         self._key = None
         self._origin = None
         self._since = None
+        self._last_ts = None
+        self._last_seq = None
+        self.break_reason = None
 
     def _moved(self, xy, heading, radius) -> bool:
         origin_xy, origin_heading = self._origin
@@ -35,20 +40,34 @@ class PositionStandstill:
             return (heading is None) != (origin_heading is None)
         return abs(float(heading) - origin_heading) * float(radius) > self.drift_m
 
-    def update(self, key, ts: float, pose, usable: bool) -> bool:
+    def update(self, key, ts: float, pose, usable: bool, seq: int | None = None) -> bool:
         """喂入一帧，返回此刻是否位置停稳。
 
         key: 车次编号（None 表示没有车次）；ts: 本帧采集时刻（秒，本机时钟）；
         pose: StabilityDetector.last_pose() 的 (位置, 航向, 半径)；usable: 本帧完整、新鲜且车辆在场。
         """
-        if not usable or pose is None or key is None:
+        self.break_reason = None
+        if not usable or pose is None or key is None or not math.isfinite(ts):
             self.reset()
+            self.break_reason = "observation_unavailable"
             return False
         if key != self._key:
             self.reset()
             self._key = key
         xy, heading, radius = pose
+        if not all(math.isfinite(v) for v in (xy[0], xy[1], radius)) or (heading is not None and not math.isfinite(heading)):
+            self.reset()
+            self.break_reason = "observation_unavailable"
+            return False
+        if self._last_ts is not None and (ts <= self._last_ts
+                or (self.max_gap_sec is not None and ts - self._last_ts > self.max_gap_sec)
+                or (seq is not None and self._last_seq is not None and seq != self._last_seq + 1)):
+            self._origin = None
+            self.break_reason = "observation_gap"
+        self._last_ts, self._last_seq = ts, seq
         if self._origin is None or self._moved(xy, heading, radius):
+            if self._origin is not None:
+                self.break_reason = "movement"
             self._origin = ((float(xy[0]), float(xy[1])), None if heading is None else float(heading))
             self._since = float(ts)
             return False

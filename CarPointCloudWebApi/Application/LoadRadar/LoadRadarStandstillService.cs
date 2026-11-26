@@ -17,24 +17,38 @@ public sealed class LoadRadarStandstillService(ILoadRadarRepository repository, 
         var now = DateTimeOffset.UtcNow;
         if (input.StoppedAt is not { } stoppedAt || stoppedAt < stored.Start.ArrivedAt || stoppedAt > now.AddSeconds(2))
             throw new LoadRadarException(400, "停稳时间缺失或超出到车至当前时间范围");
-        var captureUntil = stoppedAt.AddSeconds(10);
+        if (input.SegmentId is not null) LoadRadarService.Identifier(input.SegmentId, "segmentId");
+        var window = configuration.GetValue("LoadRadar:DimensionScanWindowSeconds", 10);
+        if (window is < 1 or > 30) throw new LoadRadarException(503, "自动尺寸采集窗口必须在 1～30 秒内");
+        var captureUntil = stoppedAt.AddSeconds(window);
         if (captureUntil <= now)
             return new(input.PassageId, "expired", stored.WorkflowId);
 
         var workflow = integration.FindVehicleArrivalByEventId(stored.WorkflowId)!;
         // NOT_REQUIRED → PENDING 只会成功一次，保证每车次最多一次扫描。
-        if (!integration.TryClaimVehicleArrivalAutoScan(workflow.Id, BusinessClock.Now))
+        var gate = new StaticCapture { PrimaryCamera = stored.CameraIdentifier, SegmentId = input.SegmentId,
+            StoppedAt = stoppedAt, CaptureUntil = captureUntil };
+        if (!integration.TryClaimStaticScan(workflow.Id, stored.WorkflowId, BusinessClock.Now, gate))
         {
             logger.LogInformation("CH4 停稳通知：本车次已派发过，不再扫描 workflowId={WorkflowId}", stored.WorkflowId);
             return new(input.PassageId, "already", stored.WorkflowId);
         }
 
         var response = await RadarScanDispatcher.DispatchAsync(radarClient, integration, workflow.Id, stored.WorkflowId,
-            CancellationToken.None, captureUntil);
+            CancellationToken.None, captureUntil, input.SegmentId);
         var status = response.IsSuccess ? "dispatched" : "rejected";
         logger.LogInformation("CH4 停稳触发双雷达: workflowId={WorkflowId}, passageId={PassageId}, result={Status}",
             stored.WorkflowId, input.PassageId, status);
         return new(input.PassageId, status, stored.WorkflowId);
+    }
+
+    public StaticDecision Observe(string nodeId, StandstillObservation input)
+    {
+        if (!IsDimensionPassage(nodeId, input.NodeId, input.ChannelId, input.PassageId))
+            return new("not_required", null);
+        LoadRadarService.Identifier(input.SegmentId, "segmentId");
+        var workflow = FindPassage(nodeId, input.ChannelId, input.PassageId).WorkflowId;
+        return integration.UpdateStaticScan(workflow, gate => gate.Observe(input, DateTimeOffset.UtcNow));
     }
 
     public async Task<LoadPassageStandstillReceipt> DepartAsync(string nodeId, LoadPassageDeparture input)

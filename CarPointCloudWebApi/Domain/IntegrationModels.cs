@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace CarPointCloudWebApi.Domain;
 
 /// <summary>
@@ -24,6 +27,11 @@ public class LicensePlateRecord
     public DateTime? CaptureTime { get; set; }
     /// <summary>乙方原始业务 ID；旧数据缺失时为空，不以 workflowId 代替。</summary>
     public string? EnterId { get; set; }
+    /// <summary>同点位首次在我方收到该 enterID 的业务时间；不使用乙方时钟。</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime? FirstSeenAt { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ConflictingIdentity { get; set; }
     /// <summary>我方发起请求时间。</summary>
     public DateTime RequestTime { get; set; }
     /// <summary>乙方业务响应码。</summary>
@@ -306,6 +314,10 @@ public class CoalVolumeDto
 /// <summary>乙方车牌接口 data 节点。</summary>
 public class PartnerLicensePlateData
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime? FirstSeenAt { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ConflictingIdentity { get; set; }
     /// <summary>乙方返回的摄像头编码。</summary>
     public string CameraId { get; set; } = string.Empty;
     /// <summary>乙方识别出的车牌号。</summary>
@@ -314,14 +326,40 @@ public class PartnerLicensePlateData
     public string CaptureTime { get; set; } = string.Empty;
     /// <summary>乙方业务 ID，必须原样传递；字段名按合同保留大写 ID。</summary>
     [System.Text.Json.Serialization.JsonPropertyName("enterID")]
+    [JsonConverter(typeof(PartnerEnterIdConverter))]
     public string EnterId { get; set; } = string.Empty;
+}
+
+internal sealed class PartnerEnterIdConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String) return reader.GetString()!;
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            // 按 JSON 原文读取整数，避免长 ID 转为浮点或受 Int64 上限影响。
+            using var token = JsonDocument.ParseValue(ref reader);
+            var raw = token.RootElement.GetRawText();
+            if (raw.IndexOfAny(['.', 'e', 'E']) < 0) return raw;
+        }
+        throw new JsonException("乙方 enterID 应为字符串或整数");
+    }
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value);
 }
 
 /// <summary>乙方车牌接口响应对象。</summary>
 public class PartnerLicensePlateResponse
 {
     /// <summary>乙方业务响应码。</summary>
-    public int Code { get; set; }
+    public JsonElement Code { get; set; }
+    /// <summary>现场乙方返回的成功标志。</summary>
+    public JsonElement Success { get; set; }
+    internal int? BusinessCode => Code.ValueKind == JsonValueKind.Number && Code.TryGetInt32(out var code) ? code : null;
+    internal bool IsSuccessful => Code.ValueKind == JsonValueKind.Undefined
+        ? Success.ValueKind == JsonValueKind.True
+        : BusinessCode == 200 && Success.ValueKind is JsonValueKind.Undefined or JsonValueKind.True;
     /// <summary>乙方业务提示信息。</summary>
     public string Message { get; set; } = string.Empty;
     /// <summary>乙方车牌数据数组；失败时可能为空。</summary>

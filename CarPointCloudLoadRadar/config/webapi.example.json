@@ -12,6 +12,6 @@
     "CH1": { "calibration_id": "CH1-calibration-v1" },
     "CH2": { "calibration_id": "CH2-calibration-v1" },
     "CH3": { "calibration_id": "CH3-calibration-v1" },
-    "CH4": { "calibration_id": "CH4-calibration-v1" }
+    "CH4": { "calibration_id": "CH4-calibration-v1", "standstill_observation_age_bound_ms": null }
   }
 }

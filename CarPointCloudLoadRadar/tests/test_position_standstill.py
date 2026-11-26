@@ -75,6 +75,14 @@ class TestPositionStandstillTimer(unittest.TestCase):
         self.assertTrue(self.t.update("p2", 7.0, pose(), True))
         self.assertFalse(self.t.update(None, 8.0, pose(), True))
 
+    def test_unknown_and_discontinuous_frames_break_the_certified_period(self):
+        for seq, ts, xy in ((12, 10.4, 0), (11, 11.1, 0), (11, 9.5, 0), (11, 10.1, float("nan"))):
+            timer = PositionStandstill(.03, .2, .75)
+            for i in range(3):
+                timer.update("car", 9.8 + .1 * i, pose(), True, 8 + i)
+            self.assertFalse(timer.update("car", ts, pose(x=xy), True, seq))
+            self.assertIn(timer.break_reason, ("observation_unavailable", "observation_gap"))
+
 
 class TestDetectorPose(unittest.TestCase):
     def test_stability_result_shape_is_unchanged(self):
@@ -107,6 +115,7 @@ class StandstillClient:
     def __init__(self):
         self.calls = []
         self.departures = []
+        self.states = []
         self.failures = 0
         self.event = threading.Event()
 
@@ -122,6 +131,10 @@ class StandstillClient:
         self.departures.append(payload)
         return {"status": "closed"}
 
+    def report_standstill_state(self, payload):
+        self.states.append(dict(payload))
+        return {"status": "accepted"}
+
 
 class TestBridgeStandstillReport(unittest.TestCase):
     def setUp(self):
@@ -129,7 +142,7 @@ class TestBridgeStandstillReport(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         config = BridgeConfig(node_id="jt-test", base_url="http://127.0.0.1:1", agent_key="test-key-" * 5,
                               storage_dir=self.tmp.name, algorithm_version="test-v1",
-                              channels={"CH4": {"calibration_id": "cal-4"}},
+                              channels={"CH4": {"calibration_id": "cal-4", "standstill_observation_age_bound_ms": 100}},
                               enabled=True, timeout_sec=1, retry_sec=1)
         self.client = StandstillClient()
         self.bridge = LoadRadarBridge(config, self.client)
@@ -154,7 +167,7 @@ class TestBridgeStandstillReport(unittest.TestCase):
         self.assertTrue(passage)
         # 未登记：不通知
         self.assertFalse(self.bridge.report_standstill("CH4", passage))
-        _, original_stopped_at = self.bridge._standstill_observed["CH4"]
+        original_stopped_at = self.bridge._standstill_observed["CH4"][1]
         # 登记回执到达（任何状态都算，含等车牌）后，下一次调用即通知
         self.bridge._prepared["CH4"] = (passage, "awaiting_plate", None, time.monotonic())
         self.assertTrue(self.bridge.report_standstill("CH4", passage))
@@ -183,6 +196,115 @@ class TestBridgeStandstillReport(unittest.TestCase):
         self.bridge._prepared["CH4"] = (passage, "ready", None, time.monotonic())
         self.assertFalse(self.bridge.report_standstill("CH4", "p-other"))
         self.assertFalse(self.bridge.report_standstill("CH4", None))
+
+    def _static_scenario(self, broken_at, *, gap=False):
+        # 生产 ChannelWorker 的逐帧入口，唯一替身是位置与检测结果。
+        from types import SimpleNamespace
+        from app.application.channel_worker import ChannelWorker
+        self.bridge.configure_channel("CH4", "a" * 64, "live")
+        passage = self.enter()
+        self.bridge._prepared["CH4"] = (passage, "awaiting_plate", None, time.monotonic())
+        position = [pose()]
+        worker = SimpleNamespace(ch=SimpleNamespace(id="CH4"), integration=self.bridge,
+                                 _position_still=PositionStandstill(.03, 2., .75),
+                                 stability=SimpleNamespace(last_pose=lambda: position[0]))
+        valid = SimpleNamespace(fresh=True, degraded=False)
+        origin = int(time.time()) - 20
+        for i in range(-20, 120):
+            if i == broken_at * 10:
+                if gap:
+                    # 观察序列缺帧；随后原位停稳也不能续上旧段。
+                    continue
+                position[0] = pose(x=.2)
+            frame = SimpleNamespace(ts=origin + i / 10, seq=i + 21)
+            ChannelWorker._report_position_standstill(worker, frame, valid, True, True, passage)
+        end = time.monotonic() + 4
+        while not any(row["reason"] for row in self.client.states) and time.monotonic() < end:
+            time.sleep(.01)
+        self.assertEqual(self.wait_calls(1), 1)
+        states = list(self.client.states)
+        self.assertTrue(states)
+        segment = self.client.calls[0]["segmentId"]
+        self.assertTrue(all(row["segmentId"] == segment and row["passageId"] == passage for row in states))
+        self.assertEqual([r["sequence"] for r in states], list(range(1, len(states) + 1)))
+        self.assertEqual(self.client.calls[0]["stoppedAt"], states[-1]["stoppedAt"])
+        return origin, states[-1]
+
+    def test_both_scans_end_at_eight_then_move_at_ten(self):
+        origin, state = self._static_scenario(10)
+        self.assertEqual(datetime.fromisoformat(state["stoppedAt"]).timestamp(), origin)
+        self.assertEqual(datetime.fromisoformat(state["lastStillAt"]).timestamp(), origin + 9.8)
+        self.assertEqual(datetime.fromisoformat(state["brokenAt"]).timestamp(), origin + 10)
+        self.assertEqual(state["reason"], "movement")
+
+    def test_move_at_seven_never_certifies_scan_ending_at_eight(self):
+        origin, state = self._static_scenario(7)
+        self.assertEqual(datetime.fromisoformat(state["lastStillAt"]).timestamp(), origin + 6.8)
+        self.assertEqual(state["reason"], "movement")
+
+    def test_sequence_gap_cannot_be_bridged_by_later_heartbeats(self):
+        origin, state = self._static_scenario(7, gap=True)
+        self.assertEqual(datetime.fromisoformat(state["lastStillAt"]).timestamp(), origin + 6.8)
+        self.assertEqual(state["reason"], "observation_gap")
+
+    def test_silent_source_freezes_at_last_observation_not_time_of_timeout(self):
+        from types import SimpleNamespace
+        from app.application.channel_worker import ChannelWorker
+        self.bridge.configure_channel("CH4", "a" * 64, "live")
+        passage = self.enter()
+        self.bridge._prepared["CH4"] = (passage, "awaiting_plate", None, time.monotonic())
+        origin = int(time.time()) - 5
+        self.bridge.observe_position("CH4", passage, origin, True, None)
+        self.bridge.observe_position("CH4", passage, origin + 1.5, True, None)
+        worker = SimpleNamespace(source=SimpleNamespace(read=lambda: None), last_frame=None,
+                                 _discard_observation_window=lambda: None, _refresh_stats=lambda: None,
+                                 st=SimpleNamespace(stability={}), stability=SimpleNamespace(expire=lambda: True, state=0),
+                                 _position_still=PositionStandstill(.03, 2., .75), ch=SimpleNamespace(id="CH4"),
+                                 integration=self.bridge)
+        self.assertFalse(ChannelWorker._tick_observation(worker))
+        deadline = time.monotonic() + 3
+        while not any(row["reason"] for row in self.client.states) and time.monotonic() < deadline:
+            time.sleep(.01)
+        final = self.client.states[-1]
+        self.assertEqual(final["reason"], "observation_gap")
+        self.assertEqual(datetime.fromisoformat(final["lastStillAt"]).timestamp(), origin + 1.4)
+
+    def test_uncommissioned_observation_time_still_triggers_without_certifying_scans(self):
+        from app.adapters.webapi_config import ChannelConfig
+        self.bridge.config.channels["CH4"] = ChannelConfig("cal-4")
+        _, state = self._static_scenario(7)
+        self.assertEqual(state["lastStillAt"], state["stoppedAt"])
+        self.assertEqual(state["reason"], "observation_timing_unknown")
+
+    def test_delayed_registration_retries_identical_sequence_then_sends_frozen_break(self):
+        entered, release = threading.Event(), threading.Event()
+        attempts = []
+        def post(payload):
+            attempts.append(dict(payload))
+            if len(attempts) == 1:
+                entered.set()
+                release.wait(4)
+                raise HttpError(409)
+            return {"status": "accepted"}
+        self.client.report_standstill_state = post
+        self.bridge.configure_channel("CH4", "a" * 64, "live")
+        passage = self.enter()
+        self.bridge._prepared["CH4"] = (passage, "awaiting_plate", None, time.monotonic())
+        origin = time.time()
+        self.bridge.observe_position("CH4", passage, origin, True, None)
+        try:
+            self.assertTrue(entered.wait(2))
+            self.bridge.observe_position("CH4", passage, origin + 2, True, None)
+            self.bridge.observe_position("CH4", passage, origin + 2.1, False, "movement")
+            self.assertEqual(self.wait_calls(1), 1)
+        finally:
+            release.set()
+        deadline = time.monotonic() + 4
+        while len(attempts) < 3 and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual([item["sequence"] for item in attempts], [1, 1, 2])
+        self.assertEqual(attempts[0], attempts[1])
+        self.assertEqual(attempts[-1]["reason"], "movement")
 
     def test_departure_reports_old_passage_and_does_not_reuse_it(self):
         passage = self.enter()

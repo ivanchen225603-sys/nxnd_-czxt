@@ -38,6 +38,13 @@ public static class CaptureProgressBuilder
                 ? "计算完成，尺寸已写入数据库，待人工审核（模型/计算值不等于已核验实测值）"
                 : "计算完成，尺寸已写入数据库");
 
+        if (Text(analysis, "staticStatus") == "pending")
+            return Set(progress, CaptureStages.Queued, false, "两路点云已保存，正在核对完整扫描是否处于同一停稳段");
+        if (Text(analysis, "staticStatus") is "rejected" or "insufficient")
+        {
+            progress.Error = Text(analysis, "staticReason");
+            return Set(progress, CaptureStages.CaptureFailed, true, $"静止证据未确认，已保留原始点云。原因：{progress.Error}");
+        }
         switch (Text(analysis, "stage"))
         {
             case "failed":

@@ -29,6 +29,7 @@ LiveHub 就是干这个的；LiveSource 传 hub=... 时会自动改为从队列�
 """
 from __future__ import annotations
 
+import errno
 import os
 import time
 import socket
@@ -40,6 +41,7 @@ from typing import Deque, Dict, List, Optional, Tuple
 import numpy as np
 
 from .pointcloud import Frame, load_xyz, apply_roi, make_synthetic_box
+from .linux_udp_batch import LinuxUdpBatch
 from .radar_packet import PacketDecoder
 from .sample_paths import discover_samples, REPLAY_NOTE
 
@@ -566,7 +568,7 @@ class ChannelQueue:
 
     def __init__(self, maxlen: int = 8192):
         self.maxlen = int(maxlen)
-        self._dq: Deque[Tuple[bytes, float]] = deque()
+        self._dq: Deque[Tuple[bytes, float]] = deque(maxlen=self.maxlen or None)
         self._cv = threading.Condition()
         self.pushed = 0
         self.dropped = 0
@@ -574,10 +576,18 @@ class ChannelQueue:
     def push(self, item: Tuple[bytes, float]) -> None:
         with self._cv:
             if self.maxlen and len(self._dq) >= self.maxlen:
-                self._dq.popleft()
                 self.dropped += 1
             self._dq.append(item)
             self.pushed += 1
+            self._cv.notify()
+
+    def push_many(self, items: List[Tuple[bytes, float]]) -> None:
+        """同一批中同通道的包只唤醒一次消费者；溢出仍保留最新的包。"""
+        with self._cv:
+            if self.maxlen:
+                self.dropped += max(0, len(self._dq) + len(items) - self.maxlen)
+            self._dq.extend(items)
+            self.pushed += len(items)
             self._cv.notify()
 
     def drain(self, timeout: float = 0.05) -> List[Tuple[bytes, float]]:
@@ -689,6 +699,8 @@ class LiveHub:
         self.strict = bool(strict)
         self.name = name
         self.sock: Optional[socket.socket] = None
+        self._batch_reader = None
+        self._socket_buffer_bytes = 0
         self.last_error = ""
         # ★ 接收线程"进程内部挂了"的标记，与"网络没数据"必须分开 ——
         #   这是全链路唯一的接收点，它一死四路同时变哑，而看板上的表现
@@ -758,6 +770,9 @@ class LiveHub:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.recv_buf)
         except OSError:
             pass
+        self._socket_buffer_bytes = s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+        # 先启用内核时间戳再绑定，首个入队报文也会携带接收时刻。
+        self._batch_reader = LinuxUdpBatch.for_socket(s, RECV_BUFSIZE)
         try:
             s.bind((self.bind_ip, self.udp_port))
         except OSError as e:
@@ -803,7 +818,10 @@ class LiveHub:
           运行时代价，而这个循环每秒要跑 3.6 万次，任何每轮开销都不可接受。
         """
         try:
-            self._recv_loop()
+            if self._batch_reader is not None and self._batch_reader.sock is self.sock:
+                self._recv_batches()
+            else:
+                self._recv_loop()
         except BaseException as exc:                          # noqa: BLE001
             # 记下来就好，不再抛 —— 这是 daemon 线程，抛出去只会打到
             # stderr 然后消失，反而不如留在快照里让看板/api 能读到。
@@ -811,6 +829,46 @@ class LiveHub:
             self.last_error = ("接收线程异常退出: %s: %s —— 四条通道都不会再收到包，"
                                "必须重启服务。" % (type(exc).__name__,
                                                  " ".join(str(exc).split())[:160]))
+
+    def _recv_batches(self) -> None:
+        reader = self._batch_reader
+        while not self._stop.is_set():
+            try:
+                items = reader.read()
+            except OSError as exc:
+                if self._stop.is_set():
+                    break
+                if exc.errno in (errno.ENOSYS, errno.EPERM):
+                    # 某些受限 Linux 环境有 libc 符号但不允许这项系统调用。
+                    self._batch_reader = None
+                    self._recv_loop()
+                    return
+                self.errors += 1
+                self.last_error = f"recvmmsg 失败: {exc}"
+                self._stop.wait(0.1)
+                continue
+            if not items:
+                continue
+            by_queue = {}
+            accepted = size = 0
+            for ip, data, timestamp in items:
+                q = self._queues.get(ip)
+                if q is None:
+                    self.unknown += 1
+                    if ip in self.unknown_ips or len(self.unknown_ips) < 64:
+                        self.unknown_ips[ip] += 1
+                    if self.strict or self._default_q is None:
+                        continue
+                    q = self._default_q
+                by_queue.setdefault(q, []).append((data, timestamp))
+                accepted += 1
+                size += len(data)
+                self.per_ip[ip] += 1
+            for q, packets in by_queue.items():
+                q.push_many(packets)
+            self.recv_count += accepted
+            self.nbytes += size
+            self.last_error = ""
 
     def _recv_loop(self) -> None:
         """收包线程：**只做查表 + 入队**，解码交给各通道线程（见类说明第 1 条）。
@@ -892,6 +950,7 @@ class LiveHub:
             except OSError:
                 pass
             self.sock = None
+        self._batch_reader = None
 
     # ── 查询 ────────────────────────────────────────────────────
     def alive(self) -> bool:
@@ -903,9 +962,14 @@ class LiveHub:
         return list(self._queues.keys())
 
     def to_dict(self) -> Dict:
+        batch_reader = self._batch_reader
         return {
             "bind": f"{self.bind_ip}:{self.udp_port}",
             "strict": self.strict,
+            "receive_method": "recvmmsg" if batch_reader is not None else "recvfrom",
+            "receive_buffer_bytes": self._socket_buffer_bytes,
+            "timestamp_source": "kernel_realtime_ns" if batch_reader is not None else "userspace_realtime",
+            "missing_timestamps": batch_reader.invalid_timestamps if batch_reader is not None else 0,
             # ★ "线程还在不在"必须与"有没有包"分开看：两者都表现为收不到数据，
             #   但一个要重启服务、一个要查网线。alive=False 时 error 里有原因。
             "alive": self.alive(),

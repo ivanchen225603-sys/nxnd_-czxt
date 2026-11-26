@@ -13,7 +13,10 @@ public partial class IntegrationRepository
         await using var connection = CreateConnection();
         await connection.OpenAsync(token);
         using var command = PartnerPageCommand(connection, "VehicleDimensionRecord", VehicleDimensionColumns,
-            "GetTime", take, windowStart, asOf, beforeTime, beforeId);
+            "GetTime", take, windowStart, asOf, beforeTime, beforeId,
+            @"NOT EXISTS (SELECT 1 FROM StaticCaptureEvidence s WHERE s.WorkflowId=VehicleDimensionRecord.WorkflowId
+                AND (s.Decision <> 'confirmed' OR s.PairId IS NULL OR VehicleDimensionRecord.PairId IS NULL
+                     OR s.PairId <> VehicleDimensionRecord.PairId))");
         using var cancellation = CancelPartnerCommand(command, token);
         var records = new List<VehicleDimensionRecord>();
         await using (var reader = await command.ExecuteReaderAsync(token))

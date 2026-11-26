@@ -7,17 +7,23 @@ namespace CarPointCloudWebApi.Application;
 public sealed class PlateAcquisitionProcessor(IIntegrationRepository repository, PartnerLicensePlateClient client,
     IConfiguration configuration, ILogger logger)
 {
-    private const int MaxAttempts = 3;
-
     public async Task RunAsync(PlateAcquisitionJob job, CancellationToken stoppingToken)
     {
+        var maxAttempts = client.MaxAttempts;
+        if (job.AttemptCount >= maxAttempts)
+        {
+            var now = BusinessClock.Now;
+            repository.FailPlateAcquisitionJob(job, PlateFailureCode.NoCapture + " 本车识牌次数已耗尽",
+                now, maxAttempts, now);
+            return;
+        }
         var firstCallAt = job.CreatedAt.AddMilliseconds(configuration.GetValue("Integration:PartnerFirstCallDelayMs", 10000));
         if (BusinessClock.Now < firstCallAt)
         {
             repository.SavePlateAcquisitionProgress(job, null, firstCallAt, null, BusinessClock.Now);
             return;
         }
-        if (!repository.TryBeginPlateAcquisitionAttempt(job, MaxAttempts, BusinessClock.Now))
+        if (!repository.TryBeginPlateAcquisitionAttempt(job, maxAttempts, BusinessClock.Now))
             return;
 
         string error;
@@ -36,6 +42,8 @@ public sealed class PlateAcquisitionProcessor(IIntegrationRepository repository,
                 LicensePlate = item.LicensePlate,
                 CaptureTime = PartnerContract.TryParseTime(item.CaptureTime, out var captured) ? captured : null,
                 EnterId = item.EnterId,
+                FirstSeenAt = item.FirstSeenAt,
+                ConflictingIdentity = item.ConflictingIdentity,
                 RequestTime = requestTime,
                 ResponseCode = 200,
                 ResponseMessage = "success",
@@ -57,8 +65,8 @@ public sealed class PlateAcquisitionProcessor(IIntegrationRepository repository,
             "interactionId={InteractionId} attempt={Attempt} decisionAt={DecisionAt:yyyy-MM-dd HH:mm:ss.fff} " +
             "terminal={Terminal} reason={Reason}",
             job.CameraIdentifier, job.WorkflowId, job.InteractionId, job.AttemptCount, BusinessClock.Now,
-            job.AttemptCount >= MaxAttempts, error.Split(' ', 2)[0]);
-        if (job.AttemptCount >= MaxAttempts)
+            job.AttemptCount >= maxAttempts, error.Split(' ', 2)[0]);
+        if (job.AttemptCount >= maxAttempts)
             repository.FailPlateAcquisitionJob(job, error, BusinessClock.Now, maxAttempts: 0, BusinessClock.Now);
         else
             repository.SavePlateAcquisitionProgress(job, null,

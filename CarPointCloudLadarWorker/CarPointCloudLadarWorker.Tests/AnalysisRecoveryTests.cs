@@ -331,17 +331,136 @@ public sealed class AnalysisRecoveryTests
             new AnalysisTaskStore(options), options, TimeProvider.System, NullLogger<AnalysisWorker>.Instance);
     }
 
-    private static PairedPcdCapture Pair(string root) => PairedPcdCapture.Create(
-        new PcdCapture(Path.Combine(root, "a.pcd"), "CAM_004", new DateTime(2026, 11, 3, 10, 0, 0), "wf-recovery"),
-        new PcdCapture(Path.Combine(root, "b.pcd"), "CAM_005", new DateTime(2026, 11, 3, 10, 0, 1), "wf-recovery"),
+    private static PairedPcdCapture Pair(string root, string workflow = "wf-recovery") => PairedPcdCapture.Create(
+        new PcdCapture(Path.Combine(root, workflow + "-a.pcd"), "CAM_004", new DateTime(2026, 11, 3, 10, 0, 0), workflow),
+        new PcdCapture(Path.Combine(root, workflow + "-b.pcd"), "CAM_005", new DateTime(2026, 11, 3, 10, 0, 1), workflow),
         new DateTime(2026, 11, 3, 10, 0, 2));
 
-    private static async Task<AnalysisRecord> WaitFor(AnalysisWorker worker, Func<AnalysisRecord, bool> done)
+    [Fact]
+    public async Task RetryWaitReleasesOnlyAnalyzerSlotForNextVehicle()
+    {
+        var root = TestSupport.TempDirectory();
+        var handler = new Handler(async (request, token) =>
+        {
+            var workflow = JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!["workflowId"]!.GetValue<string>();
+            return workflow == "wf-recovery" ? TestSupport.Json("busy", 503) : TestSupport.Json(Success);
+        });
+        using var worker = Create(root, handler, retryDelay: 60);
+        await worker.StartAsync(CancellationToken.None);
+        worker.Enqueue(Pair(root));
+        await WaitFor(worker, record => record.Stage == AnalysisStage.Queued && record.Error is not null);
+        worker.Enqueue(Pair(root, "next"));
+        await WaitFor(worker, record => record.Stage == AnalysisStage.Completed, "next");
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(2, handler.Bodies.Count);
+    }
+
+    [Fact]
+    public async Task TwoConfiguredConsumersRunTwoIndependentPairsAndQueueTheThird()
+    {
+        var root = TestSupport.TempDirectory();
+        var options = Options.Create(TestSupport.Options(o => { o.CaptureDirectory = root; o.MaxConcurrentAnalyses = 2; }));
+        var firstTwo = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = 0;
+        var handler = new Handler(async (_, token) =>
+        {
+            if (Interlocked.Increment(ref entered) == 2) firstTwo.TrySetResult();
+            await release.Task.WaitAsync(token);
+            return TestSupport.Json(Success);
+        });
+        using var analyzerHttp = new HttpClient(handler);
+        using var plateHttp = new HttpClient();
+        using var worker = new AnalysisWorker(new AnalyzerClient(analyzerHttp, options),
+            new PlateClient(plateHttp, options, NullLogger<PlateClient>.Instance),
+            new AnalysisTaskStore(options), options, TimeProvider.System, NullLogger<AnalysisWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            foreach (var id in new[] { "one", "two", "three" }) worker.Enqueue(Pair(root, id));
+            await firstTwo.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, Volatile.Read(ref entered));
+            Assert.Equal(AnalysisStage.Queued, worker.Find("three")!.Stage);
+            release.SetResult();
+            foreach (var id in new[] { "one", "two", "three" })
+                await WaitFor(worker, record => record.Stage == AnalysisStage.Completed, id);
+            Assert.Equal(3, entered);
+        }
+        finally { await worker.StopAsync(CancellationToken.None); }
+    }
+
+    [Theory]
+    [InlineData("confirmed", AnalysisStage.Completed, 1)]
+    [InlineData("rejected", AnalysisStage.Failed, 0)]
+    [InlineData("insufficient", AnalysisStage.Failed, 0)]
+    public async Task PendingStaticEvidenceIsDurableAndNeverStartsAnalyzerEarly(
+        string finalStatus, AnalysisStage finalStage, int expectedAnalyses)
+    {
+        var root = TestSupport.TempDirectory();
+        var options = Options.Create(TestSupport.Options(o =>
+        {
+            o.CaptureDirectory = root;
+            o.EnableApiRequests = true;
+            o.AppSecret = "test-only";
+        }));
+        var now = DateTimeOffset.UtcNow;
+        var window = new StaticCaptureWindow("same-stop", now.AddSeconds(10));
+        var sensor = new LadarDeviceOptions
+        {
+            VerifiedMaxScanDurationMs = 4000, VerifiedMaxCallbackDelayMs = 50, VerifiedClockUncertaintyMs = 10
+        };
+        var frame = StaticFrameEvidence.FromCallback(window, now, sensor);
+        Assert.Equal(now.AddMilliseconds(-4060), frame.ScanStartUtc);
+        Assert.Equal(now.AddMilliseconds(10), frame.ScanEndUtc);
+        Assert.Null(StaticFrameEvidence.FromCallback(window, now, new()).ScanStartUtc);
+        var source = Pair(root);
+        var pair = source with { Primary = source.Primary with { StaticEvidence = frame },
+            Secondary = source.Secondary with { StaticEvidence = frame } };
+        var attempts = 0;
+        using var evidenceHttp = new HttpClient(new Handler(async (request, token) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.EndsWith("/vehicleWorkflows/wf-recovery/staticEvidence", request.RequestUri!.AbsolutePath);
+            Assert.True(request.Headers.Contains("Signature"));
+            var data = JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!;
+            Assert.Equal(pair.VehicleCaptureId, data["pairId"]!.GetValue<string>());
+            Assert.Equal("same-stop", data["segmentId"]!.GetValue<string>());
+            Assert.Equal("CAM_005", data["secondary"]!["cameraIdentifier"]!.GetValue<string>());
+            Assert.Equal(frame.ScanStartUtc, data["primary"]!["scanStartUtc"]!.GetValue<DateTimeOffset>());
+            var state = Interlocked.Increment(ref attempts) == 1 ? "pending" : finalStatus;
+            return TestSupport.Json(System.Text.Json.JsonSerializer.Serialize(new
+                { code = 200, data = new { status = state, reason = "observed" } }));
+        }));
+        var handler = new Handler((_, _) => Task.FromResult(TestSupport.Json(Success)));
+        using var analyzerHttp = new HttpClient(handler);
+        using var plateHttp = new HttpClient();
+        AnalysisWorker Start() => new(new AnalyzerClient(analyzerHttp, options),
+            new PlateClient(plateHttp, options, NullLogger<PlateClient>.Instance), new AnalysisTaskStore(options),
+            options, TimeProvider.System, NullLogger<AnalysisWorker>.Instance, new StaticEvidenceClient(evidenceHttp, options));
+        using (var first = Start())
+        {
+            await first.StartAsync(CancellationToken.None);
+            first.Enqueue(pair);
+            await WaitFor(first, record => record.StaticReason == "observed");
+            await first.StopAsync(CancellationToken.None);
+            Assert.Empty(handler.Bodies);
+        }
+        using var second = Start();
+        await second.StartAsync(CancellationToken.None);
+        var final = await WaitFor(second, record => record.Stage == finalStage);
+        await second.StopAsync(CancellationToken.None);
+        Assert.Equal(finalStatus, final.StaticStatus);
+        Assert.Equal(expectedAnalyses, handler.Bodies.Count);
+        Assert.Equal(0, Assert.Single(new AnalysisTaskStore(options).Load()).FailureCount);
+    }
+
+    private static async Task<AnalysisRecord> WaitFor(AnalysisWorker worker, Func<AnalysisRecord, bool> done,
+        string workflow = "wf-recovery")
     {
         var deadline = DateTime.UtcNow.AddSeconds(5);
         while (true)
         {
-            if (worker.Find("wf-recovery") is { } record && done(record))
+            if (worker.Find(workflow) is { } record && done(record))
                 return record;
             Assert.True(DateTime.UtcNow < deadline, "等待分析状态超时");
             await Task.Delay(10);

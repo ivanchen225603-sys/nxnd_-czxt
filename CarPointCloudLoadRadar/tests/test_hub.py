@@ -50,6 +50,16 @@ def _wait(pred, timeout=5.0, step=0.01) -> bool:
 # ═══════════════════════════════════════════════ 队列
 
 class TestChannelQueue(unittest.TestCase):
+    def test_batch_overflow_preserves_order_and_counts_every_eviction(self):
+        q = ChannelQueue(maxlen=3)
+        q.push((b"0", 0.0))
+        q.push_many([(bytes([i]), float(i)) for i in range(1, 6)])
+        self.assertEqual(q.drain(0), [(bytes([i]), float(i)) for i in (3, 4, 5)])
+        self.assertEqual((q.pushed, q.dropped), (6, 3))
+        unlimited = ChannelQueue(maxlen=0)
+        unlimited.push_many([(b"a", 1), (b"b", 2)])
+        self.assertEqual((unlimited.qsize(), unlimited.dropped), (2, 0))
+
 
     def test_push_drain_roundtrip(self):
         q = ChannelQueue(maxlen=8)
@@ -165,6 +175,29 @@ class TestLiveHubDemux(unittest.TestCase):
             self.assertEqual(
                 payloads, sorted(f"{ip}#{k}" for k in range(n)),
                 f"{ip} 的队列里混入了别的雷达的包 —— 分流串台了")
+
+    def test_linux_batch_preserves_kernel_time_of_buffered_datagrams(self):
+        q = self.hub.register(self.ips[0], "CH1")
+        self.hub.open()
+        if self.hub._batch_reader is None:
+            self.skipTest("需要支持内核报文时间戳及 recvmmsg 的 Linux")
+        sender = _sender(self.ips[0])
+        self.socks.append(sender)
+        sender.sendto(b"first", ("127.0.0.1", self.port))
+        time.sleep(0.03)
+        sender.sendto(b"second", ("127.0.0.1", self.port))
+        time.sleep(0.05)
+        before_drain = time.time()
+        self.hub.start()
+        self.assertTrue(_wait(lambda: q.qsize() == 2))
+        items = q.drain(0)
+        self.assertEqual([p for p, _ in items], [b"first", b"second"])
+        self.assertGreater(items[1][1] - items[0][1], 0.015)
+        self.assertLess(items[1][1], before_drain - 0.02)
+        info = self.hub.to_dict()
+        self.assertEqual((info["receive_method"], info["timestamp_source"], info["missing_timestamps"]),
+                         ("recvmmsg", "kernel_realtime_ns", 0))
+        self.assertEqual(info["receive_buffer_bytes"], self.hub.sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
 
     def test_unknown_source_dropped_and_counted(self):
         """未登记的源在 strict 模式下被丢弃 + 计数（不串进任何通道）。"""

@@ -19,6 +19,25 @@ namespace CarPointCloudWebApi.Tests;
 /// </remarks>
 public sealed class RadarLiveContractTests
 {
+    [Fact]
+    public async Task Only_complete_standstill_dispatches_carry_a_signature_bound_to_trip_segment_and_deadline()
+    {
+        var headers = new List<string?>();
+        var handler = new CountingHandler(request =>
+        {
+            headers.Add(request.Headers.TryGetValues("X-Standstill-Dispatch", out var values) ? values.Single() : null);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+        });
+        var config = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Integration:AppSecret"] = "fixture" }).Build();
+        var client = new RadarLiveClient(new StubHttpClientFactory(handler), config);
+        var end = DateTimeOffset.FromUnixTimeMilliseconds(1000456);
+        await client.StartScanAsync("abc", default, end, "stop1");
+        await client.StartScanAsync("abc", default, end);
+        await client.StartScanAsync("abc", default);
+        Assert.Equal(new string?[] { "e526164485cfd2ad3ea97aa395348393a8e761389c4de3c3a9f3ea5527b02ee5", null, null }, headers);
+    }
+
     private const string TestRecorderToken = "test-only-recorder-token-0123456789abcdef";
     // ------------------------------------------------------------ 鉴权归属
 
@@ -622,6 +641,22 @@ public sealed class RadarLiveContractTests
         Assert.Equal(CaptureStages.CompletedWithoutDimensions, progress.Stage);
         Assert.True(progress.Terminal);
         Assert.Contains("载荷状态不确定", progress.Message);
+    }
+
+    [Theory]
+    [InlineData("pending", CaptureStages.Queued, false)]
+    [InlineData("insufficient", CaptureStages.CaptureFailed, true)]
+    [InlineData("rejected", CaptureStages.CaptureFailed, true)]
+    public void Progress_ShowsStaticDecisionForSavedPair(string status, string stage, bool terminal)
+    {
+        var analysis = new JsonObject
+        {
+            ["stage"] = "queued", ["staticStatus"] = status, ["staticReason"] = "test_reason"
+        };
+        var progress = CaptureProgressBuilder.Build("wf-static", Arrival("wf-static"), null, analysis, null);
+        Assert.Equal(stage, progress.Stage);
+        Assert.Equal(terminal, progress.Terminal);
+        if (terminal) Assert.Equal("test_reason", progress.Error);
     }
 
     [Fact]

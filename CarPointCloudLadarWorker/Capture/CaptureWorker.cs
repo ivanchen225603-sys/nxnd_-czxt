@@ -33,7 +33,7 @@ public sealed class CaptureWorker(
                 "{Camera}/{Source} 已采集 {Count} 点 -> {PcdPath} workflowId={WorkflowId} capturedAt={CapturedAt:HH:mm:ss.fff} 采集到落盘={PersistMs}ms",
                 frame.CameraIdentifier, frame.Source, frame.Points.Length, path, frame.WorkflowId, frame.CapturedAt,
                 (long)(DateTime.Now - frame.CapturedAt).TotalMilliseconds);
-            Pair(new PcdCapture(path, frame.CameraIdentifier, frame.CapturedAt, frame.WorkflowId));
+            Pair(new PcdCapture(path, frame.CameraIdentifier, frame.CapturedAt, frame.WorkflowId, frame.StaticEvidence));
         }
     }
 

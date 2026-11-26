@@ -45,6 +45,19 @@ public class IntegrationController : ControllerBase
         _configuration = configuration;
     }
 
+    [HttpPost("vehicleWorkflows/{workflowId}/staticEvidence")]
+    public IActionResult StaticEvidence(string workflowId, StaticPairEvidence evidence,
+        [FromServices] IIntegrationRepository repository)
+    {
+        // 乙方与本机 Worker 使用同一种签名，只有本机 Worker 可提交扫描时序。
+        var remote = HttpContext.Connection.RemoteIpAddress;
+        if (remote is null || !System.Net.IPAddress.IsLoopback(remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote))
+            return StatusCode(403);
+        LoadRadarService.Identifier(workflowId, "workflowId");
+        var result = repository.UpdateStaticScan(workflowId, gate => gate.Offer(evidence, DateTimeOffset.UtcNow));
+        return Ok(ApiResponse<StaticDecision>.Success(result));
+    }
+
     /// <summary>
     /// 获取车辆尺寸数据。
     /// </summary>

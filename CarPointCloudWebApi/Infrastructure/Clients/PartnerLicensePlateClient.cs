@@ -17,7 +17,7 @@ public class PartnerLicensePlateClient(
     ILogger<PartnerLicensePlateClient> logger,
     IHttpContextAccessor httpContextAccessor)
 {
-    private const int MaxAttempts = 3;
+    internal int MaxAttempts => Math.Clamp(options.Value.PartnerRetryCount, 1, 3);
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>
@@ -61,7 +61,7 @@ public class PartnerLicensePlateClient(
         throw lastError;
     }
 
-    /// <summary>调用一次乙方接口，超时 PartnerTimeoutMs；非 2xx 或 code≠200 抛出异常。</summary>
+    /// <summary>调用一次乙方接口；兼容合同响应码和现场布尔成功标志。</summary>
     public async Task<List<PartnerLicensePlateData>> GetLicensePlateSnapshotForWorkflowAsync(
         string cameraIdentifier, string? workflowId, string interactionId, int attempt, CancellationToken cancellationToken)
     {
@@ -94,12 +94,17 @@ public class PartnerLicensePlateClient(
             body = await response.Content.ReadAsStringAsync(timeout.Token);
             response.EnsureSuccessStatusCode();
             parsed = JsonSerializer.Deserialize<PartnerLicensePlateResponse>(body, Json);
-            if (parsed?.Code != 200 || parsed.Data is null)
-                throw new InvalidOperationException($"乙方车牌接口返回失败: code={parsed?.Code}");
+            if (parsed is not { IsSuccessful: true, Data: not null })
+                throw new InvalidOperationException($"乙方车牌接口返回失败: code={parsed?.BusinessCode}, success={parsed?.Success.ValueKind}");
             candidates = parsed.Data.Where(item => item is not null && item.CameraId == cameraIdentifier &&
                 PartnerContract.IsLicensePlate(item.LicensePlate) &&
                 PartnerContract.TryParseTime(item.CaptureTime, out _) &&
                 !string.IsNullOrWhiteSpace(item.EnterId)).ToList();
+            var observedAt = BusinessClock.Now;
+            if (candidates.Count != 0 && configuration.GetValue("Database:Enabled", true))
+                repository.ObservePartnerCaptures(cameraIdentifier, candidates, observedAt);
+            else
+                foreach (var item in candidates) item.FirstSeenAt = observedAt;
             return candidates;
         }
         catch (Exception ex)
@@ -119,10 +124,10 @@ public class PartnerLicensePlateClient(
             logger.LogInformation(
                 "乙方车牌响应 camera={CameraIdentifier} workflowId={WorkflowId} interactionId={InteractionId} attempt={Attempt} " +
                 "requestedAt={RequestedAt:yyyy-MM-dd HH:mm:ss.fff} receivedAt={ReceivedAt:yyyy-MM-dd HH:mm:ss.fff} " +
-                "elapsedMs={ElapsedMs} httpStatus={HttpStatus} businessCode={BusinessCode} candidateCount={CandidateCount} " +
+                "elapsedMs={ElapsedMs} httpStatus={HttpStatus} businessCode={BusinessCode} partnerSuccess={PartnerSuccess} candidateCount={CandidateCount} " +
                 "errorType={ErrorType} truncated={Truncated} response={Response}",
                 cameraIdentifier, workflowId, interactionId, attempt, requestedAt, receivedAt, elapsedMs, httpStatus,
-                parsed?.Code, candidates?.Count, error?.GetType().Name, truncated, responseBody);
+                parsed?.BusinessCode, parsed?.Success.ValueKind, candidates?.Count, error?.GetType().Name, truncated, responseBody);
             await WriteAuditAsync(new ApiAccessLogRecord
             {
                 RecordKind = "Access",
@@ -147,7 +152,7 @@ public class PartnerLicensePlateClient(
                 TimestampHeader = timestamp,
                 ResponseBody = responseBody,
                 HttpStatus = httpStatus,
-                BusinessCode = parsed?.Code ?? 0,
+                BusinessCode = parsed?.BusinessCode ?? (parsed?.IsSuccessful == true ? 200 : 0),
                 ElapsedMs = elapsedMs,
                 ErrorMessage = error?.Message,
                 CreatedAt = receivedAt

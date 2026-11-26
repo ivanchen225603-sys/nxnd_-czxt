@@ -1,5 +1,7 @@
 using System.Net;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CarPointCloudLadarWorker.Analysis;
 using CarPointCloudLadarWorker.Config;
@@ -11,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace CarPointCloudLadarWorker.Api;
 
 /// <summary>
-/// 本机 HTTP 控制接口（无鉴权，默认只监听 127.0.0.1）。请求处理都是内存读写，逐个串行处理。
+/// 本机 HTTP 控制接口。停稳段提前留帧仅接受同机 WebApi 的签名派发。
 /// </summary>
 public sealed class ControlApiServer(
     IOptions<LadarCaptureOptions> options,
@@ -44,7 +46,7 @@ public sealed class ControlApiServer(
         int status;
         try
         {
-            (body, status) = Route(request.HttpMethod, path, request.QueryString, request.Headers);
+            (body, status) = Route(request.HttpMethod, path, request.QueryString, request.Headers, request.RemoteEndPoint?.Address);
         }
         catch (Exception ex)
         {
@@ -69,7 +71,7 @@ public sealed class ControlApiServer(
 
     private (object Body, int Status) Route(
         string method, string path, System.Collections.Specialized.NameValueCollection query,
-        System.Collections.Specialized.NameValueCollection headers)
+        System.Collections.Specialized.NameValueCollection headers, IPAddress? caller)
     {
         var cycle = radars.EstimatedCycleSeconds;
         switch (method, path)
@@ -82,9 +84,11 @@ public sealed class ControlApiServer(
                         return (new { success = false, message = "captureUntil 必须是带偏移的 ISO 时间" }, 400);
                     captureUntil = until;
                 }
-                var start = sessions.Start(
-                    string.IsNullOrWhiteSpace(query["requestId"]) ? headers["Idempotency-Key"] : query["requestId"],
-                    captureUntil);
+                var requestId = string.IsNullOrWhiteSpace(query["requestId"]) ? headers["Idempotency-Key"] : query["requestId"];
+                var segmentId = query["segmentId"];
+                var signedDispatch = IsSignedStandstillDispatch(caller, _options.AppSecret, requestId, segmentId,
+                    captureUntil, headers["X-Standstill-Dispatch"]);
+                var start = sessions.Start(requestId, captureUntil, segmentId, signedDispatch);
                 logger.LogInformation("scan-once 指令已处理 workflowId={WorkflowId} started={Started} idempotent={Idempotent} code={Code}",
                     start.Snapshot.RequestId, start.Started, start.Idempotent, start.Code);
                 return (ApiResponses.Command(start, cycle), ApiResponses.StartStatusCode(start));
@@ -174,6 +178,19 @@ public sealed class ControlApiServer(
 
         var stop = sessions.Stop("通过 standby mode=1 人工停止单次扫描");
         return (StopBody(stop, cycle), ApiResponses.StopStatusCode(stop));
+    }
+
+    internal static bool IsSignedStandstillDispatch(IPAddress? caller, string? secret, string? workflow,
+        string? segment, DateTimeOffset? deadline, string? signature)
+    {
+        if (caller is null || !IPAddress.IsLoopback(caller.IsIPv4MappedToIPv6 ? caller.MapToIPv4() : caller) ||
+            string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(workflow) || string.IsNullOrWhiteSpace(segment) ||
+            deadline is null || signature?.Length != 64)
+            return false;
+        var message = FormattableString.Invariant($"standstill-scan\n{workflow}\n{segment}\n{deadline.Value.ToUnixTimeMilliseconds()}");
+        var mac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(message));
+        var expected = Convert.ToHexString(mac).ToLowerInvariant();
+        return CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(expected), Encoding.ASCII.GetBytes(signature));
     }
 
     private static object StopBody(ScanCommandResult r, double? cycle) =>

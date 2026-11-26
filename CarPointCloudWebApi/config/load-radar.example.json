@@ -1,7 +1,8 @@
 {
   "LoadRadar": {
     "Enabled": false,
-    "DimensionScanChannelId": "",
+    "DimensionScanChannelId": "CH4",
+    "DimensionScanWindowSeconds": 10,
     "StorageRoot": "/data/carpointcloud/load-radar",
     "Nodes": [
       {

@@ -17,6 +17,7 @@ from typing import Dict, Optional
 
 from .load_radar_contract import BaselineCache, build_measurement, make_candidate, _hash
 from .load_radar_transport import BridgeConfig, HttpClient, HttpError, SQLiteOutbox, command_body
+from .standstill_evidence import StillEvidenceSender, StillSegment, utc_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,10 @@ class LoadRadarBridge(threading.Thread):
         self._closed = False
         self._async_preparation = False
         # 位置停稳通知（CH4 双雷达触发）：每车次一次，独立线程发送，不排在测量上传后面。
-        self._standstill_observed: Dict[str, tuple[str, str]] = {}
-        self._standstill_pending: Dict[str, tuple[str, str]] = {}
+        self._standstill_observed: Dict[str, tuple[str, str, Optional[str]]] = {}
+        self._standstill_pending: Dict[str, tuple[str, str, Optional[str]]] = {}
+        self._still_segments: Dict[str, StillSegment] = {}
+        self._still_sender = StillEvidenceSender(self.client, config.retry_sec, config.timeout_sec)
         self._standstill_done: Dict[tuple, None] = {}
         self._departure_pending: Dict[tuple[str, str], float] = {}
         self._departure_wake = threading.Event()
@@ -193,7 +196,7 @@ class LoadRadarBridge(threading.Thread):
                     self._projection_quit.wait(.2)
 
     def _quarantine(self, channel: str) -> None:
-        self._close_scan_passage(channel, self._lanes[channel]["passage"])
+        self._close_scan_passage(channel, self._lanes[channel]["passage"], "observation_gap")
         self._loaded.pop(channel, None)
         self._prepared.pop(channel, None)
         self._starts.pop(channel, None)
@@ -275,14 +278,58 @@ class LoadRadarBridge(threading.Thread):
                             arrivedAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
                         self._wake.set()
 
-    def report_standstill(self, channel: str, passage: Optional[str]) -> bool:
+    def observe_position(self, channel: str, passage: Optional[str], ts: float, still: bool,
+                         break_reason: str | None) -> None:
+        """观测时刻来自采集帧。只向当前已触发的同一段出具连续证明。"""
+        if channel != "CH4":
+            if still:
+                self.report_standstill(channel, passage)
+            return
+        with self._lock:
+            if not passage or self._closed or self.current_passage(channel) != passage:
+                return
+            if self._starts.get(channel, {}).get("passageId") != passage:
+                return  # 只有真实采集的车次进入平台登记和证据链。
+            segment = self._still_segments.get(channel)
+            if not still:
+                if segment is not None and segment.broken is None:
+                    self._seal_segment(channel, segment, ts, break_reason or "stationarity_not_confirmed")
+                return
+            scheduled = channel in self._standstill_pending or (channel, passage) in self._standstill_done
+            if segment is None or (segment.broken is not None and not scheduled
+                                   and segment.reason != "observation_timing_unknown"):
+                segment = self._still_segments[channel] = StillSegment.begin(passage, ts)
+                self._standstill_observed.pop(channel, None)
+                logger.info("位置停稳 channel=%s passageId=%s segmentId=%s stoppedAt=%s",
+                            channel, passage, segment.id, utc_stamp(ts))
+            self.report_standstill(channel, passage, segment)
+            if segment.broken is not None:
+                return
+            bound = self.config.channels[channel].standstill_observation_age_bound_ms
+            if bound is None:
+                logger.warning("静止观测时延上界未经核实，采集仅供诊断 channel=%s passageId=%s", channel, passage)
+                self._seal_segment(channel, segment, ts, "observation_timing_unknown")
+                return
+            segment.last = max(segment.last, ts - bound / 1000)
+            if segment.published_until is None or segment.last - segment.published_until >= 1:
+                segment.published_until = segment.last
+                self._still_sender.publish(segment.snapshot(self.config.node_id, channel))
+
+    def _seal_segment(self, channel: str, segment: StillSegment, ts: float, reason: str) -> None:
+        segment.seal(ts, reason)
+        self._still_sender.publish(segment.snapshot(self.config.node_id, channel))
+        logger.info("连续静止段结束 channel=%s passageId=%s segmentId=%s lastStillAt=%s brokenAt=%s reason=%s",
+                    channel, segment.passage, segment.id, utc_stamp(segment.last), utc_stamp(segment.broken), reason)
+
+    def report_standstill(self, channel: str, passage: Optional[str], segment: StillSegment | None = None) -> bool:
         """位置停稳时由通道线程调用：本车次已登记且尚未通知过才排队，网络在后台线程。"""
         with self._lock:
             if self._closed or not passage or self.current_passage(channel) != passage:
                 return False
             observed = self._standstill_observed.get(channel)
             if observed is None or observed[0] != passage:
-                observed = (passage, datetime.now(timezone.utc).isoformat())
+                observed = (passage, utc_stamp(segment.start) if segment else datetime.now(timezone.utc).isoformat(),
+                            segment.id if segment else None)
                 self._standstill_observed[channel] = observed
             prepared = self._prepared.get(channel)
             if (prepared is None or prepared[0] != passage
@@ -297,9 +344,13 @@ class LoadRadarBridge(threading.Thread):
         self._standstill_wake.set()
         return True
 
-    def _close_scan_passage(self, channel: str, passage: Optional[str]) -> None:
+    def _close_scan_passage(self, channel: str, passage: Optional[str], reason: str = "departure") -> None:
         """离场或失去连续观测时交给通知线程，雷达帧处理线程无需等待 HTTP。"""
         self._standstill_observed.pop(channel, None)
+        if channel == "CH4":
+            segment = self._still_segments.pop(channel, None)
+            if segment is not None and segment.broken is None:
+                self._seal_segment(channel, segment, time.time(), reason)
         scheduled = self._standstill_pending.pop(channel, None)
         key = (channel, passage)
         if passage and (scheduled is not None or key in self._standstill_done):
@@ -339,12 +390,14 @@ class LoadRadarBridge(threading.Thread):
             for channel, observed in jobs:
                 if self._quit.is_set():
                     return
-                passage, stopped_at = observed
+                passage, stopped_at, segment_id = observed
                 if self.current_passage(channel) != passage:
                     continue
                 try:
-                    self.client.report_standstill(dict(nodeId=self.config.node_id, channelId=channel,
-                                                       passageId=passage, stoppedAt=stopped_at))
+                    payload = dict(nodeId=self.config.node_id, channelId=channel, passageId=passage, stoppedAt=stopped_at)
+                    if segment_id is not None:
+                        payload["segmentId"] = segment_id
+                    self.client.report_standstill(payload)
                 except HttpError as exc:
                     if exc.retryable:
                         continue                  # 网络失败：车次仍在时下一轮重发
@@ -1070,6 +1123,7 @@ class LoadRadarBridge(threading.Thread):
         if self._closed:
             return
         self._quit.set()
+        self._still_sender.close()
         self._wake.set()
         self._standstill_wake.set()
         self._departure_wake.set()

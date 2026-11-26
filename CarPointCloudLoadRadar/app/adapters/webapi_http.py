@@ -40,6 +40,9 @@ class HttpClient:
     def report_departure(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._dictionary(self._call("POST", "/passages/departure", _json_bytes(payload), "application/json"))
 
+    def report_standstill_state(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._dictionary(self._call("POST", "/passages/standstill-state", _json_bytes(payload), "application/json"))
+
     def get_measurement(self, measurement_id: str) -> Dict[str, Any]:
         return self._dictionary(self._call("GET", "/measurements/" + parse.quote(_identifier(measurement_id), safe="")))
 

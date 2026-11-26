@@ -1,0 +1,20 @@
+[Unit]
+Description=Per-channel vehicle plate match monitor
+After=carpointcloudwebapi.service
+RequiresMountsFor=/data/carpointcloud
+
+[Service]
+Type=simple
+User=yxzk
+Group=yxzk
+UMask=0077
+ExecStart=/data/carpointcloud/ops/plate-watch/plate-watch run --since "2026-11-26 10:32:19"
+Restart=always
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/data/carpointcloud/service-state/plate-watch
+Environment=TZ=Asia/Shanghai
+
+[Install]
+WantedBy=multi-user.target

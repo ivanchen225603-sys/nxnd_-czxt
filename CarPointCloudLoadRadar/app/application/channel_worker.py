@@ -220,7 +220,8 @@ class ChannelWorker(threading.Thread):
         # CH4 双雷达尺寸采集触发：独立的位置停稳，不改原判稳（见 app/position_standstill.py）
         from ..position_standstill import PositionStandstill
         self._position_still = PositionStandstill(self.calib.detection.stationary_drift_m,
-                                                  self.calib.detection.stationary_min_sec)
+                                                  self.calib.detection.stationary_min_sec,
+                                                  self.calib.detection.stationary_max_gap_sec)
         self.max_save = max(1, int(self.calib.detection.stable_save_max))
         # 最近一帧（已裁 ROI），供 /api/export 导出 PLY/XYZ 现场排查用。
         # 只保留一帧，约 0.6MB，不值得为它做更复杂的缓存。
@@ -850,6 +851,11 @@ class ChannelWorker(threading.Thread):
                                          motion_observable=False, motion_pending=False,
                                          instant_speed_mps=0., jitter_confirmed=False, reason="新帧超时")
                 if self.integration is not None:
+                    self._position_still.reset()
+                    report = getattr(self.integration, "observe_position", None)
+                    if report is not None:
+                        report(self.ch.id, self.integration.current_passage(self.ch.id), time.time(),
+                               False, "observation_gap")
                     self.integration.observe(self.ch.id, None, False)
                 if self.last_frame is not None:
                     try:
@@ -1906,8 +1912,12 @@ class ChannelWorker(threading.Thread):
     def _report_position_standstill(self, frame, stab, complete, occupied, passage) -> None:
         """位置停稳且本车次已登记即通知 WebApi 触发双雷达；只读，不影响原判稳、留样或体积。"""
         try:
-            usable = bool(complete and stab.fresh and not stab.degraded and occupied is not False)
-            still = self._position_still.update(passage, float(frame.ts), self.stability.last_pose(), usable)
+            usable = bool(complete and stab.fresh and not stab.degraded and occupied is True)
+            still = self._position_still.update(passage, float(frame.ts), self.stability.last_pose(), usable, frame.seq)
+            observe = getattr(self.integration, "observe_position", None)
+            if callable(observe):
+                observe(self.ch.id, passage, float(frame.ts), still, self._position_still.break_reason)
+                return
             report = getattr(self.integration, "report_standstill", None)
             if still and callable(report):
                 report(self.ch.id, passage)

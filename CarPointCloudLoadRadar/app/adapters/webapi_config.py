@@ -12,9 +12,14 @@ from .bridge_boundary import _identifier, _text, _safe_storage, _unique_object, 
 @dataclass(frozen=True)
 class ChannelConfig:
     calibration_id: str
+    # JT128 单帧最早有效位置观测到末包接收的实测上界。未知时只触发采集。
+    standstill_observation_age_bound_ms: float | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.calibration_id)
+        bound = self.standstill_observation_age_bound_ms
+        if bound is not None and (type(bound) not in (int, float) or not math.isfinite(bound) or bound <= 0):
+            raise ValueError("静止观测时延上界必须是现场核定的正毫秒数或 null")
 
 
 @dataclass(frozen=True)
@@ -48,9 +53,9 @@ class BridgeConfig:
         for key, value in self.channels.items():
             _identifier(key, 64)
             if isinstance(value, dict):
-                if set(value) != {"calibration_id"}:
+                if "calibration_id" not in value or set(value) - {"calibration_id", "standstill_observation_age_bound_ms"}:
                     raise ValueError("通道配置缺失字段或包含未知字段")
-                value = ChannelConfig(value["calibration_id"])
+                value = ChannelConfig(**value)
             if not isinstance(value, ChannelConfig):
                 raise ValueError("通道配置格式无效")
             channels[key] = value

@@ -15,6 +15,36 @@ public sealed class PlateAcquisitionProcessorTests
     private const string Camera = "CAM_001";
 
     [Fact]
+    public async Task Field_boolean_response_binds_one_capture_and_audits_the_original_payload()
+    {
+        var job = Job(20, 0);
+        var body = JsonSerializer.Serialize(new { success = true, msg = "ok", data = new[]
+        {
+            new { CAMERAID = Camera, LICENSEPLATE = "宁A12345",
+                CAPTURETIME = job.CreatedAt.AddSeconds(8).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                ENTERID = 9007199254740993L }
+        } });
+        using var http = new HttpClient(new PartnerHandler(body));
+        var repo = new JobRepository();
+        var config = new ConfigurationBuilder().Build();
+        var client = new PartnerLicensePlateClient(http, Options.Create(new IntegrationOptions
+        {
+            AppSecret = "test-secret", PartnerBaseUrl = "http://partner.local"
+        }), repo, config, NullLogger<PartnerLicensePlateClient>.Instance, new HttpContextAccessor());
+        await new PlateAcquisitionProcessor(repo, client, config, NullLogger.Instance).RunAsync(job, default);
+        var bound = Assert.IsType<LicensePlateRecord>(repo.Completed);
+        Assert.Equal(job.WorkflowId, bound.WorkflowId);
+        Assert.Equal("宁A12345", bound.LicensePlate);
+        Assert.Equal("9007199254740993", bound.EnterId);
+        var audit = Assert.IsType<ApiAccessLogRecord>(repo.Audit);
+        Assert.Equal(200, audit.BusinessCode);
+        Assert.Equal("PartnerResponseReceived", audit.LifecycleStage);
+        using var original = JsonDocument.Parse(audit.ResponseBody!);
+        Assert.True(original.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(9007199254740993L, original.RootElement.GetProperty("data")[0].GetProperty("ENTERID").GetInt64());
+    }
+
+    [Fact]
     public async Task Outbound_audit_preserves_response_order_and_redacts_credentials()
     {
         var now = BusinessClock.Now;
@@ -131,7 +161,8 @@ public sealed class PlateAcquisitionProcessorTests
             Capture("宁A45125", job.CreatedAt.AddSeconds(11 + interval), "next-trip")];
         await Processor(repository, captures).RunAsync(job, CancellationToken.None);
 
-        var nextRepository = new JobRepository { OffsetSeconds = [11, 11, 11], Neighbors = [job.CreatedAt] };
+        var nextRepository = new JobRepository { OffsetSeconds = [11, 11, 11],
+            NeighborRows = [new(job.CreatedAt, repository.Completed is not null)] };
         if (repository.Completed?.EnterId is { } claimed) nextRepository.ClaimedIds.Add(claimed);
         await Processor(nextRepository, captures).RunAsync(next, CancellationToken.None);
 
@@ -194,6 +225,106 @@ public sealed class PlateAcquisitionProcessorTests
         Assert.Equal(job.CreatedAt.AddSeconds(10), repository.NextAttemptAt);
     }
 
+    [Theory]
+    [InlineData(16)]
+    [InlineData(21)]
+    public async Task Unresolved_previous_passage_cannot_lose_a_late_capture_to_the_next_car(int capturedSeconds)
+    {
+        var next = Job(arrivedSecondsAgo: 20, attempts: 0);
+        var prior = next.CreatedAt.AddSeconds(-20);
+        var repo = new JobRepository { NeighborRows = [new(prior, false)] };
+        await Processor(repo, Capture("宁A12345", prior.AddSeconds(capturedSeconds), "prior"))
+            .RunAsync(next, default);
+        Assert.Null(repo.Completed);
+        Assert.Contains("prior_passage_capture", repo.Decisions);
+    }
+
+    [Fact]
+    public async Task Cold_start_checks_older_unresolved_passages_even_after_an_identified_neighbor()
+    {
+        var job = Job(20, 0);
+        var repo = new JobRepository { NeighborRows = [
+            new(job.CreatedAt.AddSeconds(-40), false), new(job.CreatedAt.AddSeconds(-20), true)] };
+        await Processor(repo, Capture("宁A12345", job.CreatedAt.AddSeconds(1), "old"))
+            .RunAsync(job, default);
+        Assert.Null(repo.Completed);
+        Assert.Contains("prior_passage_capture", repo.Decisions);
+    }
+
+    [Theory]
+    [InlineData(24)]
+    [InlineData(93)]
+    [InlineData(1936)]
+    public async Task Cold_start_can_pass_an_older_failure_when_a_confirmed_capture_separates_it(int priorDistance)
+    {
+        var job = Job(20, 0);
+        var at = job.CreatedAt;
+        var repo = new JobRepository { NeighborRows = [
+            new(at.AddSeconds(-priorDistance), false),
+            new(at.AddSeconds(-12), true, Second(at.AddSeconds(-13)))] };
+        var response = new[] {
+            Capture("宁A06241F", at.AddSeconds(-3), "0001"),
+            Capture("宁A09185", at.AddSeconds(-21), "9999") };
+        await Processor(repo, response).RunAsync(job, default);
+        Assert.Equal("0001", repo.Completed?.EnterId);
+    }
+
+    [Fact]
+    public async Task Partner_only_trips_after_an_anchor_cannot_force_a_rank_match()
+    {
+        var job = Job(20, 0);
+        var at = job.CreatedAt;
+        var repo = new JobRepository { NeighborRows = [
+            new(at.AddMinutes(-15), false), new(at.AddSeconds(-12), true, Second(at.AddSeconds(-10)))] };
+        await Processor(repo, Capture("宁A09185", at.AddSeconds(-2), "9000"),
+            Capture("宁A27066", at.AddSeconds(1), "0001")).RunAsync(job, default);
+        Assert.Null(repo.Completed);
+        Assert.Contains("ambiguous", repo.Decisions);
+    }
+
+    [Fact]
+    public async Task An_unresolved_trip_after_the_last_anchor_still_competes_for_a_late_capture()
+    {
+        var job = Job(20, 0);
+        var at = job.CreatedAt;
+        var repo = new JobRepository { NeighborRows = [
+            new(at.AddSeconds(-40), true, Second(at.AddSeconds(-42))), new(at.AddSeconds(-20), false)] };
+        await Processor(repo, Capture("宁A09185", at.AddSeconds(1), "001")).RunAsync(job, default);
+        Assert.Null(repo.Completed);
+        Assert.Contains("prior_passage_capture", repo.Decisions);
+    }
+
+    [Fact]
+    public async Task Unresolved_old_passage_outside_partner_snapshot_does_not_block_an_isolated_new_capture()
+    {
+        var job = Job(20, 0);
+        var repo = new JobRepository { NeighborRows = [new(job.CreatedAt.AddHours(-2), false)] };
+        await Processor(repo, Capture("宁A12345", job.CreatedAt.AddSeconds(3), "new")).RunAsync(job, default);
+        Assert.Equal("new", repo.Completed?.EnterId);
+    }
+
+    [Fact]
+    public void Calibration_requires_a_unique_consistent_group_of_three()
+    {
+        static PlateCaptureWindow Window(params int[] offsets) => PlateCaptureWindow.FromHistory(
+            offsets.Select(x => TimeSpan.FromSeconds(x)).ToArray(), 5, 30, 5);
+        Assert.False(Window(-37, -37).IsCalibrated);
+        Assert.False(Window(0, 9, 18, 27, 36).IsCalibrated);
+        Assert.False(Window(0, 2, 4, 6).IsCalibrated);
+        Assert.True(Window(-38, -37, -37, -36, 80).IsCalibrated);
+    }
+
+    [Fact]
+    public async Task Reduced_budget_finishes_a_recovered_job_without_another_request()
+    {
+        var job = Job(20, 1);
+        var repo = new JobRepository { MaxAttempts = 1 };
+        await Processor(repo, Capture("宁A12345", job.CreatedAt.AddSeconds(3))).RunAsync(job, default);
+        Assert.StartsWith(PlateFailureCode.NoCapture, repo.FailedError);
+        Assert.Equal(1, job.AttemptCount);
+        Assert.Null(repo.Completed);
+    }
+
     private static PlateAcquisitionJob Job(int arrivedSecondsAgo, int attempts) => new()
     {
         Id = 1,
@@ -227,7 +358,8 @@ public sealed class PlateAcquisitionProcessorTests
             AppSecret = "test-secret",
             PartnerBaseUrl = "http://partner.local",
             LicensePlatePath = "/api/v1/licensePlateRecords",
-            PartnerTimeoutMs = 3000
+            PartnerTimeoutMs = 3000,
+            PartnerRetryCount = repository.MaxAttempts
         }), repository, configuration, NullLogger<PartnerLicensePlateClient>.Instance, new HttpContextAccessor());
         return new PlateAcquisitionProcessor(repository, client, configuration, NullLogger.Instance);
     }
@@ -252,6 +384,9 @@ public sealed class PlateAcquisitionProcessorTests
         public DateTime? ArrivalTime;
         public int[] OffsetSeconds = [];
         public DateTime[] Neighbors = [];
+        public PlateArrivalNeighbor[] NeighborRows = [];
+        public List<string> Decisions = [];
+        public int MaxAttempts = 3;
         public HashSet<string> ClaimedIds = [];
 
         public override Task InsertApiAccessLogAsync(ApiAccessLogRecord record, CancellationToken cancellationToken = default)
@@ -280,9 +415,10 @@ public sealed class PlateAcquisitionProcessorTests
             IReadOnlyList<LicensePlateRecord> candidates)
         {
             var window = PlateCaptureWindow.FromHistory(OffsetSeconds.Select(x => TimeSpan.FromSeconds(x)).ToArray(), 5, 30, 5);
-            Completed = window.MatchUnique(candidates, ArrivalTime ?? job.CreatedAt, Neighbors,
-                OffsetSeconds.Length == 0 ? BusinessClock.Now.AddSeconds(5) : null,
-                candidate => ClaimedIds.Contains(candidate.EnterId!));
+            Completed = window.MatchUnique(candidates, ArrivalTime ?? job.CreatedAt,
+                [.. NeighborRows, .. Neighbors.Select(at => new PlateArrivalNeighbor(at, false))],
+                window.IsCalibrated ? null : BusinessClock.Now.AddSeconds(5),
+                candidate => ClaimedIds.Contains(candidate.EnterId!), (_, reason) => Decisions.Add(reason));
             return Completed is not null;
         }
 
