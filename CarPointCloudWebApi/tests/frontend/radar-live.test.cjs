@@ -246,7 +246,7 @@ test('explicit acquisition rejection stops pending UI and preserves the retry ke
     h.element('plateInput').value = 'test100';
     h.click('btnCapture');
     const attempt = h.take('/captures');
-    assert.equal(attempt.options.body.confirmOverwriteEmptyProfile, true);
+    assert.equal(attempt.options.body.confirmOverwriteEmptyProfile, false);
     const key = attempt.options.headers['Idempotency-Key'];
     attempt.reject({ code: 503, message: '采集安全门禁未满足：acquisition_unverified' });
     await flush();
@@ -264,6 +264,107 @@ test('explicit acquisition rejection stops pending UI and preserves the retry ke
     assert.equal(h.requests.filter(r => r.url.includes('/captures')).length, 0);
     h.click('btnCapture');
     assert.equal(h.take('/captures').options.headers['Idempotency-Key'], key);
+});
+
+test('paused preview keeps scanning status live and follows another workflow without cancellation', async () => {
+    const h = harness();
+    h.click('btnStopWatch');
+    h.take('/fused-frame').resolve({ data: { updated: false } });
+    h.take('/status').resolve({ data: { scan: { state: 'scanning', requestId: 'ch4-auto' } } });
+    await flush();
+    assert.equal(h.element('btnCapture').disabled, true);
+    assert.match(h.element('scanBusyHint').textContent, /后台正在采集.*ch4-auto/);
+    assert.equal(h.element('btnViewActiveCapture').hidden, false);
+    h.tick(1000);
+    assert.equal(h.requests.filter(r => r.url.includes('/fused-frame')).length, 0);
+    await h.click('btnCapture');
+    assert.equal(h.requests.filter(r => r.options?.method === 'POST').length, 0);
+
+    h.click('btnViewActiveCapture');
+    h.take('/captures/ch4-auto').resolve({ data: { stage: 'waiting', terminal: false } });
+    await flush();
+    assert.equal(h.element('captureModal').style.display, 'flex');
+    assert.equal(h.element('btnCancelCapture').disabled, true);
+    await h.click('btnCancelCapture');
+    assert.equal(h.requests.filter(r => r.options?.method === 'POST').length, 0);
+    h.tick(1500);
+    h.take('/captures/ch4-auto').resolve({ data: { stage: 'completed_without_dimensions', terminal: true } });
+    await flush();
+    assert.equal(h.element('btnCapture').disabled, true);
+
+    h.tick(2000);
+    h.take('/status').resolve({ data: { scan: { state: 'idle' } } });
+    await flush();
+    assert.equal(h.element('btnCapture').disabled, false);
+    assert.equal(h.element('btnViewActiveCapture').hidden, true);
+    assert.equal(h.element('scanBusyHint').textContent, '');
+});
+
+test('viewer can open another workflow but cannot cancel it', async () => {
+    const h = harness('', 'viewer');
+    h.take('/status').resolve({ data: { preview: { available: true }, scan: { state: 'scanning', requestId: 'ch4-auto' } } });
+    await flush();
+    h.click('btnViewActiveCapture');
+    h.take('/captures/ch4-auto').resolve({ data: { stage: 'waiting', terminal: false } });
+    await flush();
+    await h.click('btnCancelCapture');
+    assert.equal(h.element('btnCapture').hidden, true);
+    assert.equal(h.element('btnCancelCapture').hidden, true);
+    assert.equal(h.requests.filter(r => r.options?.method === 'POST').length, 0);
+});
+
+test('worker busy clears the attempted key and ignores an older status response', async () => {
+    const h = harness();
+    const olderStatus = h.take('/status');
+    h.element('plateInput').value = '川A12047';
+    h.click('btnCapture');
+    const attempt = h.take('/captures');
+    attempt.reject({ code: 409, data: { errorCode: 'worker_busy', activeWorkflowId: 'ch4-auto' } });
+    await flush();
+    olderStatus.resolve({ data: { scan: { state: 'idle' } } });
+    await flush();
+    assert.equal(h.element('btnCapture').disabled, true);
+    assert.equal(h.element('confirmAction').style.display, 'none');
+    assert.match(h.element('progressSteps').innerHTML, /双雷达正忙/);
+    assert.doesNotMatch(h.element('progressSteps').innerHTML, /确认后重试/);
+    assert.equal(h.element('btnViewActiveCaptureModal').hidden, false);
+    h.tick(2000);
+    h.take('/status').resolve({ data: { scan: { state: 'idle' } } });
+    await flush();
+    h.click('btnCapture');
+    assert.notEqual(h.take('/captures').options.headers['Idempotency-Key'], attempt.options.headers['Idempotency-Key']);
+});
+
+test('API request preserves typed conflict details alongside the numeric status', async () => {
+    const data = { errorCode: 'worker_busy', activeWorkflowId: 'ch4-auto' };
+    const context = vm.createContext({
+        window: {},
+        fetch: async () => ({ ok: false, status: 409, json: async () => ({ code: 409, message: '双雷达忙', data }) })
+    });
+    vm.runInContext(fs.readFileSync(path.join(scriptRoot, 'api-client.js'), 'utf8'), context);
+    await assert.rejects(vm.runInContext("API.request('/api/v1/radar-live/captures')", context), error => {
+        assert.equal(error.code, 409);
+        assert.equal(error.data, data);
+        return true;
+    });
+});
+
+test('overwriting an existing empty profile requires its own explicit confirmation', async () => {
+    const h = harness();
+    h.element('plateInput').value = '川A12047';
+    h.click('btnCapture');
+    const first = h.take('/captures');
+    assert.equal(first.options.body.confirmOverwriteEmptyProfile, false);
+    first.reject({ code: 409, data: { errorCode: 'empty_profile_exists', existingProfileScanTime: '2026-11-26 10:10:01' } });
+    await flush();
+    assert.equal(h.element('confirmAction').style.display, 'none');
+    assert.equal(h.element('confirmOverwriteAction').hidden, false);
+    assert.match(h.element('existingProfileScanTime').textContent, /2026-11-26 10:10:01/);
+    assert.equal(h.requests.filter(r => r.options?.method === 'POST').length, 0);
+    h.click('btnConfirmOverwrite');
+    const confirmed = h.take('/captures');
+    assert.equal(confirmed.options.body.confirmOverwriteEmptyProfile, true);
+    assert.equal(confirmed.options.headers['Idempotency-Key'], first.options.headers['Idempotency-Key']);
 });
 
 for (const code of [0, 503, 409]) {
@@ -614,7 +715,7 @@ test('legacy review gap nulls remain missing while a measured zero remains zero'
 
 test('read-only viewer UI script has a new cache version', () => {
     const html = fs.readFileSync(path.join(scriptRoot, '../live.html'), 'utf8');
-    assert.match(html, /js\/radar-live\.js\?v=20261106-result/);
+    assert.match(html, /js\/radar-live\.js\?v=20261127-capture/);
 });
 
 test('failed analysis cannot show stale review candidates as completed calculations', async () => {

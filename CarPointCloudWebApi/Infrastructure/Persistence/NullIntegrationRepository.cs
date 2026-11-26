@@ -115,6 +115,8 @@ public class NullIntegrationRepository : IIntegrationRepository
     }
 
     /// <inheritdoc />
+    public virtual bool DeleteUndispatchedManualArrival(long recordId) => false;
+
     public virtual void UpdateVehicleArrivalRadarResult(long recordId, string radarStatus, string? radarError, DateTime updatedAt)
     {
         throw new InvalidOperationException("Vehicle-arrival persistence requires Database:Enabled=true.");

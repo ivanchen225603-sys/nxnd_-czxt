@@ -153,6 +153,9 @@ public interface IIntegrationRepository
     /// <summary>Persists the outcome of the CAM004 radar operation.</summary>
     void UpdateVehicleArrivalRadarResult(long recordId, string radarStatus, string? radarError, DateTime updatedAt);
 
+    /// <summary>撤销尚待派发且被 Worker 明确拒绝的新手动来车。</summary>
+    bool DeleteUndispatchedManualArrival(long recordId);
+
     /// <summary>CH4 停稳自动触发：仅当雷达状态仍为 NOT_REQUIRED 时置为 PENDING，同一车次只能成功一次。</summary>
     /// <remarks>不复用 <see cref="TryClaimVehicleArrivalRadarProcessing"/>：它允许 FAILED/超时 PENDING 重新占用，会变成自动补扫。</remarks>
     bool TryClaimVehicleArrivalAutoScan(long recordId, DateTime updatedAt) => false;

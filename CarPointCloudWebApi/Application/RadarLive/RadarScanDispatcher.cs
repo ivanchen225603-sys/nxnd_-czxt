@@ -13,11 +13,16 @@ public static class RadarScanDispatcher
         DateTimeOffset? captureUntil = null, string? segmentId = null)
     {
         var response = await radarClient.StartScanAsync(workflowId, cancellationToken, captureUntil, segmentId);
+        RecordResult(repository, arrivalId, response);
+        return response;
+    }
+
+    internal static void RecordResult(IIntegrationRepository repository, long arrivalId, RadarWorkerResponse response)
+    {
         repository.UpdateVehicleArrivalRadarResult(
             arrivalId,
             response.IsSuccess ? VehicleArrivalRadarStatus.Succeeded : VehicleArrivalRadarStatus.Failed,
             response.IsSuccess ? null : $"HTTP {response.StatusCode}: {response.Body?["message"]}",
             BusinessClock.Now);
-        return response;
     }
 }

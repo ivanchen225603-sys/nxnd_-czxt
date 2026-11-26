@@ -65,6 +65,9 @@ public sealed class ManualCaptureResponse
     public JsonNode? Scan { get; set; }
 }
 
+/// <summary>手动采集冲突详情，外层保留统一接口的 HTTP 数字状态码。</summary>
+public sealed record ManualCaptureConflict(string ErrorCode, string? ActiveWorkflowId, string? ExistingProfileScanTime);
+
 /// <summary>一次手动采集在页面上的完整进度与结果。</summary>
 /// <remarks>
 /// 三个来源合成，且<b>不能互相替代</b>：

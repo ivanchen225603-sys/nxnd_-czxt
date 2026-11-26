@@ -139,6 +139,54 @@ public sealed class PartnerPlateObservationDmTests
         Assert.False(rows.Read());
     }
 
+    [IsolatedDmFact]
+    public void FailedManualArrival_DoesNotCompeteWithAutomaticPlateAcquisition()
+    {
+        var dsn = Environment.GetEnvironmentVariable("STATIC_GATE_TEST_DSN")!;
+        var config = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["ConnectionStrings:CarPointCloudDb"] = dsn }).Build();
+        var repo = new IntegrationRepository(config);
+        var now = BusinessClock.Now;
+        var arrival = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)).AddSeconds(-11);
+        foreach (var manual in new[] { true, false })
+        {
+            var camera = "T" + Guid.NewGuid().ToString("N")[..24];
+            VehicleArrivalRecord Insert(DateTime at, string plateStatus, string? source, string radarStatus) =>
+                repo.InsertVehicleArrivalRecord(new VehicleArrivalRecord
+                {
+                    EventId = Guid.NewGuid().ToString("N"), SessionId = Guid.NewGuid().ToString("N"),
+                    CameraIdentifier = camera, DeviceId = "test", EventType = "ARRIVAL",
+                    ArrivalTime = at, CreatedAt = at, UpdatedAt = at, PlateStatus = plateStatus,
+                    PlateSource = source, RadarStatus = radarStatus,
+                    LicensePlate = source == "MANUAL" ? "宁A12089" : null
+                }).Record;
+            var prior = Insert(arrival.AddSeconds(-20), manual ? VehicleArrivalPlateStatus.Succeeded : VehicleArrivalPlateStatus.Failed,
+                manual ? "MANUAL" : null, VehicleArrivalRadarStatus.Failed);
+            var current = Insert(arrival, VehicleArrivalPlateStatus.Pending, null, VehicleArrivalRadarStatus.NotRequired);
+            var candidate = new LicensePlateRecord
+            {
+                CameraIdentifier = camera, CameraId = camera, WorkflowId = current.SessionId,
+                CaptureTime = arrival.AddSeconds(1), EnterId = "new-capture", LicensePlate = "宁A12090",
+                RequestTime = now, CreatedAt = now, IsSuccess = true, ResponseCode = 200, ResponseMessage = "success"
+            };
+            repo.ObservePartnerCaptures(camera, [new PartnerLicensePlateData
+            {
+                CameraId = camera, EnterId = candidate.EnterId!, LicensePlate = candidate.LicensePlate,
+                CaptureTime = PartnerContract.FormatTime(candidate.CaptureTime)!
+            }], now);
+            var job = ClaimOwnJob(dsn, current);
+            Assert.True(repo.TryBeginPlateAcquisitionAttempt(job, 3, now));
+            Assert.Equal(manual, repo.TryCompletePlateAcquisitionJob(job, [candidate]));
+            Assert.Equal(manual ? candidate.LicensePlate : null, repo.GetSucceededWorkflowLicensePlate(current.SessionId));
+            Assert.False(repo.DeleteUndispatchedManualArrival(prior.Id));
+            Assert.NotNull(repo.GetVehicleArrivalBySessionId(prior.SessionId));
+
+            var unaccepted = Insert(now, VehicleArrivalPlateStatus.Succeeded, "MANUAL", VehicleArrivalRadarStatus.Pending);
+            Assert.True(repo.DeleteUndispatchedManualArrival(unaccepted.Id));
+            Assert.Null(repo.GetVehicleArrivalBySessionId(unaccepted.SessionId));
+        }
+    }
+
     private static PlateAcquisitionJob ClaimOwnJob(string dsn, VehicleArrivalRecord arrival)
     {
         // 仅领取本测试的 workflow，避免消费其他同时执行的集成用例。

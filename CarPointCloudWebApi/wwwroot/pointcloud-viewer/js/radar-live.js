@@ -38,7 +38,6 @@
     const dom = {};
     let renderer = null;
     let frameTimer = null;
-    let statusTimer = null;
     let captureTimer = null;
     let currentVersion = 0;
     let displayExpiresAt = 0;
@@ -50,12 +49,16 @@
     let capturePlate = null;
     /** 待人工确认时保留的车牌，供"确认未采集"按钮复用同一次流程。 */
     let pendingConfirmPlate = null;
+    let pendingOverwritePlate = null;
+    let externalScanning = false;
+    let activeWorkflowId = null;
     let hasFittedOnce = false;
     let watching = false;
     let watchGeneration = 0;
     let previewGeneration = 0;
     let frameBusy = false;
     let statusBusy = false;
+    let statusGeneration = 0;
     let captureGeneration = 0;
     let dispatchBusy = false;
     let progressBusy = false;
@@ -75,10 +78,14 @@
             dom.btnCapture.hidden = true;
             dom.btnCancelCapture.hidden = true;
             dom.btnConfirmRedispatch.hidden = true;
+            dom.btnConfirmOverwrite.hidden = true;
             dom.plateInput.disabled = true;
             showBanner(dom.captureHint, 'info', '当前账号仅可查看预览和采集结果；发起或取消采集需要管理员。');
         }
         bindEvents();
+        updateCaptureControls();
+        pollStatus();
+        setInterval(pollStatus, STATUS_POLL_MS);
 
         try {
             renderer = PointCloudGL.create(dom.canvas);
@@ -111,6 +118,12 @@
         dom.cameraBTitle = document.getElementById('cameraBTitle');
         dom.pairStatus = document.getElementById('pairStatus');
         dom.captureHint = document.getElementById('captureHint');
+        dom.scanBusyHint = document.getElementById('scanBusyHint');
+        dom.btnViewActiveCapture = document.getElementById('btnViewActiveCapture');
+        dom.btnViewActiveCaptureModal = document.getElementById('btnViewActiveCaptureModal');
+        dom.confirmOverwriteAction = document.getElementById('confirmOverwriteAction');
+        dom.existingProfileScanTime = document.getElementById('existingProfileScanTime');
+        dom.btnConfirmOverwrite = document.getElementById('btnConfirmOverwrite');
         dom.captureModal = document.getElementById('captureModal');
         dom.captureModalMeta = document.getElementById('captureModalMeta');
         dom.btnCloseModal = document.getElementById('btnCloseModal');
@@ -140,6 +153,9 @@
         dom.btnStopWatch.addEventListener('click', stopWatching);
         dom.btnCapture.addEventListener('click', () => startCapture());
         dom.btnConfirmRedispatch.addEventListener('click', () => startCapture({ force: true }));
+        dom.btnConfirmOverwrite.addEventListener('click', () => startCapture({ overwrite: true }));
+        dom.btnViewActiveCapture.addEventListener('click', viewActiveCapture);
+        dom.btnViewActiveCaptureModal.addEventListener('click', viewActiveCapture);
         dom.btnCancelCapture.addEventListener('click', cancelCapture);
         dom.btnCloseModal.addEventListener('click', closeCaptureModal);
         dom.btnReopenProgress.addEventListener('click', openCaptureModal);
@@ -166,9 +182,7 @@
         clearPreview('正在连接实时预览');
         dom.btnStartWatch.disabled = true;
         dom.btnStopWatch.disabled = false;
-        pollStatus();
         pollFrame();
-        statusTimer = setInterval(pollStatus, STATUS_POLL_MS);
         frameTimer = setInterval(pollFrame, FRAME_POLL_MS);
     }
 
@@ -178,9 +192,7 @@
         clearPreview('预览已暂停，不显示历史画面');
         dom.btnStartWatch.disabled = false;
         dom.btnStopWatch.disabled = true;
-        clearInterval(statusTimer);
         clearInterval(frameTimer);
-        statusTimer = null;
         frameTimer = null;
     }
 
@@ -303,15 +315,15 @@
     }
 
     async function pollStatus() {
-        if (!watching || statusBusy) return;
+        if (statusBusy) return;
         statusBusy = true;
-        const generation = watchGeneration;
+        const generation = statusGeneration;
         try {
             const result = await API.request('/api/v1/radar-live/status');
-            if (!watching || generation !== watchGeneration) return;
+            if (generation !== statusGeneration) return;
             renderStatus(result.data);
         } catch (err) {
-            if (!watching || generation !== watchGeneration) return;
+            if (!watching) return;
             clearPreview('雷达状态不可用，等待重新连接');
             if (err && err.code === 401) return;
             showBanner(dom.previewBanner, 'error', err.message || '雷达状态不可用');
@@ -319,8 +331,13 @@
     }
 
     function renderStatus(status) {
-        const preview = status.preview || {};
         const scan = status.scan || {};
+        const ownScan = currentWorkflowId && !readOnlyResult && scan.requestId === currentWorkflowId;
+        if (scan.state === 'scanning' || scan.state === 'idle') {
+            setExternalScan(scan.state === 'scanning' && !ownScan, scan.requestId);
+        }
+        if (!watching) return;
+        const preview = status.preview || {};
         const radars = status.radars || [];
         const cameras = preview.cameras || [];
 
@@ -349,6 +366,28 @@
 
         renderPairStatus();
 
+    }
+
+    function setExternalScan(scanning, workflowId) {
+        externalScanning = scanning;
+        activeWorkflowId = scanning ? workflowId || null : null;
+        if (scanning) {
+            showBanner(dom.scanBusyHint, 'warn', '后台正在采集'
+                + (activeWorkflowId ? '（流程 ' + activeWorkflowId + '）' : ''));
+        } else {
+            hideBanner(dom.scanBusyHint);
+        }
+        updateCaptureControls();
+    }
+
+    function updateCaptureControls() {
+        dom.btnCapture.disabled = !canCapture || captureActive || dispatchBusy || externalScanning;
+        dom.btnConfirmOverwrite.disabled = dom.btnCapture.disabled;
+        dom.btnConfirmRedispatch.disabled = dom.btnCapture.disabled;
+        dom.btnViewActiveCapture.hidden = !activeWorkflowId;
+        dom.btnViewActiveCapture.disabled = dispatchBusy || captureActive;
+        dom.btnViewActiveCaptureModal.hidden = !activeWorkflowId || readOnlyResult;
+        dom.btnViewActiveCaptureModal.disabled = dispatchBusy || captureActive;
     }
 
     function renderPairStatus() {
@@ -400,9 +439,27 @@
             showBanner(dom.captureHint, 'error', '结果流程编号格式无效');
             return;
         }
+        openReadOnlyCapture(workflowId, false);
+    }
+
+    function viewActiveCapture() {
+        if (!activeWorkflowId || dispatchBusy || captureActive) return;
+        openReadOnlyCapture(activeWorkflowId, true);
+    }
+
+    function openReadOnlyCapture(workflowId, follow) {
         currentWorkflowId = workflowId;
         readOnlyResult = true;
         captureGeneration++;
+        clearInterval(captureTimer);
+        captureTimer = follow ? setInterval(pollCapture, CAPTURE_POLL_MS) : null;
+        hideConfirmAction();
+        dom.confirmOverwriteAction.hidden = true;
+        pendingOverwritePlate = null;
+        updateCaptureControls();
+        renderProgress(null);
+        dom.resultArea.className = 'result-empty';
+        dom.resultArea.textContent = '正在查询采集进度…';
         openCaptureModal();
         setModalMeta(workflowId, null);
         dom.btnCancelCapture.disabled = true;
@@ -411,12 +468,17 @@
     }
 
     async function startCapture(options) {
-        if (!canCapture || dispatchBusy) return;
-        const force = !!(options && options.force);
+        if (!canCapture || dispatchBusy || captureActive || externalScanning) return;
+        const force = options?.force === true;
+        if (force && !pendingConfirmPlate) return;
+        const inputPlate = (dom.plateInput.value || '').replace(/\s/g, '').toUpperCase();
+        const overwrite = options?.overwrite === true;
+        if (overwrite && (!pendingOverwritePlate || pendingOverwritePlate !== inputPlate)) return;
         hideBanner(dom.captureBanner);
         hideConfirmAction();
-        const plate = (force && pendingConfirmPlate ? pendingConfirmPlate
-            : (dom.plateInput.value || '')).replace(/\s/g, '').toUpperCase();
+        dom.confirmOverwriteAction.hidden = true;
+        pendingOverwritePlate = null;
+        const plate = force ? pendingConfirmPlate : inputPlate;
         if (!plate) {
             // 还没发起任何请求，弹模态框只会挡住要填的输入框。
             showBanner(dom.captureHint, 'error', '请先输入本次过车的车牌号');
@@ -443,8 +505,8 @@
                 + Math.random().toString(36).slice(2, 10);
         }
 
-        dom.btnCapture.disabled = true;
         dispatchBusy = true;
+        updateCaptureControls();
         captureGeneration++;
         clearInterval(captureTimer);
         captureTimer = null;
@@ -455,11 +517,12 @@
                 body: {
                     licensePlate: plate,
                     idempotencyKey: captureIdempotencyKey,
-                    confirmOverwriteEmptyProfile: true,
+                    confirmOverwriteEmptyProfile: overwrite,
                     forceRedispatch: force
                 }
             });
             currentWorkflowId = result.data.workflowId;
+            if (activeWorkflowId === currentWorkflowId) setExternalScan(false);
             pendingConfirmPlate = result.data.licensePlate;
             dom.btnCancelCapture.disabled = false;
             setModalMeta(currentWorkflowId, result.data.licensePlate);
@@ -471,27 +534,43 @@
             pollCapture();
             captureTimer = setInterval(pollCapture, CAPTURE_POLL_MS);
         } catch (err) {
-            dom.btnCapture.disabled = false;
             captureActive = false;
-            // 409 有两种：车牌已有空车档案（勾选确认后重试），
-            // 或服务端无法核实上一次派发结果（必须人工判断本车是否已经采过）。
-            // 两种都保留幂等键：确认后再点必须收敛到同一次采集。
+            const conflict = err.code === 409 ? err.data?.errorCode : null;
+            if (conflict === 'worker_busy') {
+                captureIdempotencyKey = null;
+                pendingConfirmPlate = null;
+                statusGeneration++;
+                setExternalScan(true, err.data.activeWorkflowId);
+            } else if (conflict === 'empty_profile_exists') {
+                pendingOverwritePlate = plate;
+                dom.existingProfileScanTime.textContent = err.data.existingProfileScanTime
+                    ? '已有空车档案扫描时间 ' + err.data.existingProfileScanTime : '该车已有空车档案';
+                dom.confirmOverwriteAction.hidden = false;
+            }
             const level = err.code === 409 ? 'warn' : 'error';
             showBanner(dom.captureBanner, level, err.message || '发起采集失败');
-            renderDispatchFailure(plate, err);
-            if (err.code === 409 && /无法核实/.test(err.message || '')) {
+            renderDispatchFailure(plate, err, conflict);
+            if (conflict === 'capture_unverified' || (err.code === 409 && !conflict && /无法核实/.test(err.message || ''))) {
+                pendingConfirmPlate = plate;
                 showConfirmAction();
+            } else {
+                pendingConfirmPlate = null;
             }
-        } finally { dispatchBusy = false; }
+        } finally {
+            dispatchBusy = false;
+            updateCaptureControls();
+        }
     }
 
-    function renderDispatchFailure(plate, err) {
+    function renderDispatchFailure(plate, err, conflict) {
         // 仅识别当前服务器明确的门禁拒绝；普通 503/超时不能证明雷达没有执行。
         const gateRejected = err.code === 503 &&
             /^采集安全门禁未满足[：:]\s*acquisition_unverified(?:\s|$)/.test(err.message || '');
         const title = gateRejected ? '采集未启动：完整场采集条件尚未确认'
-            : err.code === 409 ? '请求未完成：需要确认后重试'
-                : '未取得采集受理确认';
+            : conflict === 'worker_busy' ? '双雷达正忙于另一车次采集'
+                : conflict === 'empty_profile_exists' ? '已有空车档案，等待覆盖确认'
+                    : conflict === 'idempotency_conflict' ? '请求编号与车牌冲突'
+                        : '未取得采集受理确认';
         dom.btnCancelCapture.disabled = true;
         dom.captureModalMeta.textContent = '车牌 ' + plate + ' · 未收到流程编号';
         dom.progressSteps.innerHTML = '<div class="progress-step failed"><span>✕</span><span>'
@@ -499,10 +578,11 @@
         dom.resultArea.className = 'result-empty';
         dom.resultArea.textContent = gateRejected
             ? '本次请求已被雷达拒绝，未保存 PCD、未进行计算。需要先核实完整场、最大交付延迟及扫描周期；实时预览可继续使用。'
-            : '尚未取得本次计算结果。请按上方提示处理；网络异常不代表采集未执行，请保留当前页面并使用同一请求重试，勿换编号重复采集。';
+            : conflict === 'worker_busy' ? '请等待当前扫描结束，或点击“查看当前采集进度”。'
+                : conflict === 'empty_profile_exists' ? '请先核对车牌和已有档案，再确认是否覆盖。'
+                    : '尚未取得本次计算结果。请按上方提示处理；网络异常不代表采集未执行，请保留当前页面并使用同一请求重试，勿换编号重复采集。';
         dom.resultSummary.innerHTML = '<p class="summary-empty">' + escapeHtml(title)
-            + '。请保留当前请求，按流程详情中的提示处理。</p>';
-        // 来车记录可能已经建立。保留幂等键，不自动重发，也不假称流程不存在。
+            + '。请按流程详情中的提示处理。</p>';
         updateReopenButton();
     }
 
@@ -541,18 +621,18 @@
 
             if (!progress.terminal && !readOnlyResult && !captureTimer) {
                 captureActive = true;
-                dom.btnCapture.disabled = true;
+                updateCaptureControls();
                 captureTimer = setInterval(pollCapture, CAPTURE_POLL_MS);
             }
             if (progress.terminal) {
                 clearInterval(captureTimer);
                 captureTimer = null;
-                dom.btnCapture.disabled = false;
                 dom.btnCancelCapture.disabled = true;
                 // 本次流程已定案，下一次点击必须是一次全新的采集。
                 if (!readOnlyResult) captureIdempotencyKey = null;
                 pendingConfirmPlate = null;
                 captureActive = false;
+                updateCaptureControls();
                 hideConfirmAction();
                 updateReopenButton();
                 if (progress.stage === 'completed') {
@@ -575,7 +655,7 @@
             clearInterval(captureTimer);
             captureTimer = null;
             captureActive = false;
-            dom.btnCapture.disabled = false;
+            updateCaptureControls();
             dom.btnCancelCapture.disabled = true;
             updateReopenButton();
             showBanner(dom.captureBanner, 'error', (err.message || '进度查询失败') + '；可点击“刷新本次结果”继续查询原流程。');

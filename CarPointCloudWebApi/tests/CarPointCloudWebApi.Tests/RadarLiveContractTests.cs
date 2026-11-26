@@ -845,10 +845,8 @@ public sealed class RadarLiveContractTests
     {
         var repository = new RecordingArrivalRepository(existing: null);
         var profiles = new StubEmptyProfileRepository(hasProfile: true);
-        var controller = CreateController(
-            repository,
-            new CountingHandler(ScanAcceptedResponse),
-            profiles);
+        var radar = new CountingHandler(ScanAcceptedResponse);
+        var controller = CreateController(repository, radar, profiles);
 
         var result = await controller.CreateCapture(
             new ManualCaptureRequest
@@ -859,8 +857,128 @@ public sealed class RadarLiveContractTests
             },
             CancellationToken.None);
 
-        Assert.IsType<ConflictObjectResult>(result.Result);
+        var conflict = Assert.IsType<ApiResponse<ManualCaptureConflict>>(Assert.IsType<ConflictObjectResult>(result.Result).Value);
+        Assert.Equal("empty_profile_exists", conflict.Data!.ErrorCode);
+        Assert.Equal("2026-09-01 08:00:00", conflict.Data.ExistingProfileScanTime);
         Assert.Equal(0, repository.InsertCount);
+        Assert.Equal(0, radar.PostCount);
+
+        var confirmed = await controller.CreateCapture(new ManualCaptureRequest
+        {
+            LicensePlate = "宁A10333F", IdempotencyKey = "key-5", ConfirmOverwriteEmptyProfile = true
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(confirmed.Result);
+        Assert.Equal(1, repository.InsertCount);
+        Assert.Equal(1, radar.PostCount);
+    }
+
+    [Fact]
+    public async Task NewCapture_WhenWorkerIsScanning_DoesNotInsertOrDispatch()
+    {
+        var repository = new RecordingArrivalRepository(null);
+        var radar = new CountingHandler(_ => throw new InvalidOperationException("不应派发"),
+            () => JsonResponse(200, """{"scan":{"state":"scanning","requestId":"ch4-auto"}}"""));
+        var controller = CreateController(repository, radar);
+        var result = await controller.CreateCapture(new ManualCaptureRequest
+        {
+            LicensePlate = "宁A10333F", IdempotencyKey = "busy-new"
+        }, CancellationToken.None);
+
+        var conflict = Assert.IsType<ApiResponse<ManualCaptureConflict>>(Assert.IsType<ConflictObjectResult>(result.Result).Value);
+        Assert.Equal(409, conflict.Code);
+        Assert.Equal("worker_busy", conflict.Data!.ErrorCode);
+        Assert.Equal("ch4-auto", conflict.Data.ActiveWorkflowId);
+        Assert.Equal(0, repository.InsertCount);
+        Assert.Equal(0, radar.PostCount);
+    }
+
+    [Fact]
+    public async Task WorkerBusyAfterPrecheck_RemovesOnlyTheNewUnacceptedArrival()
+    {
+        var repository = new RecordingArrivalRepository(null);
+        var radar = new CountingHandler(_ =>
+        {
+            Assert.Equal(VehicleArrivalRadarStatus.Pending, repository.Current!.RadarStatus);
+            return JsonResponse(409, """{"code":"busy","scan":{"state":"scanning","requestId":"ch4-won-race"}}""");
+        });
+        var controller = CreateController(repository, radar);
+        var result = await controller.CreateCapture(new ManualCaptureRequest
+        {
+            LicensePlate = "宁A10333F", IdempotencyKey = "race-new"
+        }, CancellationToken.None);
+
+        var conflict = Assert.IsType<ApiResponse<ManualCaptureConflict>>(Assert.IsType<ConflictObjectResult>(result.Result).Value);
+        Assert.Equal("worker_busy", conflict.Data!.ErrorCode);
+        Assert.Equal("ch4-won-race", conflict.Data.ActiveWorkflowId);
+        Assert.Equal(1, repository.InsertCount);
+        Assert.Equal(1, repository.DeleteCount);
+        Assert.Null(repository.Current);
+    }
+
+    [Fact]
+    public async Task ConcurrentSameKey_WaitsForTheFirstWorkerReceiptAndReusesItsWorkflow()
+    {
+        var repository = new RecordingArrivalRepository(null);
+        var workerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWorker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var radar = new CountingHandler(ScanAcceptedResponse)
+        {
+            BeforePost = async () =>
+            {
+                workerEntered.TrySetResult();
+                await releaseWorker.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        };
+        var request = new ManualCaptureRequest { LicensePlate = "宁A10333F", IdempotencyKey = "concurrent-accepted" };
+        var first = CreateController(repository, radar).CreateCapture(request, CancellationToken.None);
+        await workerEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = CreateController(repository, radar).CreateCapture(request, CancellationToken.None);
+        try
+        {
+            Assert.Equal(1, repository.InsertCount);
+            Assert.Equal(1, radar.PostCount);
+            Assert.False(second.IsCompleted);
+        }
+        finally { releaseWorker.TrySetResult(); }
+        var original = Assert.IsType<ApiResponse<ManualCaptureResponse>>(Assert.IsType<OkObjectResult>((await first).Result).Value).Data!;
+        var replay = Assert.IsType<ApiResponse<ManualCaptureResponse>>(Assert.IsType<OkObjectResult>((await second).Result).Value).Data!;
+        Assert.Equal(original.WorkflowId, replay.WorkflowId);
+        Assert.True(replay.Duplicate);
+        Assert.Equal(1, radar.PostCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnreachableStatusProbe_LeavesTheActualDispatchInCharge(bool disconnected)
+    {
+        var repository = new RecordingArrivalRepository(null);
+        var radar = new CountingHandler(ScanAcceptedResponse,
+            () => disconnected ? throw new HttpRequestException("连接中断") : JsonResponse(503, "{}"));
+        var result = await CreateController(repository, radar).CreateCapture(
+            new ManualCaptureRequest { LicensePlate = "宁A10333F", IdempotencyKey = "status-unavailable" },
+            CancellationToken.None);
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(1, repository.InsertCount);
+        Assert.Equal(1, radar.PostCount);
+    }
+
+    [Fact]
+    public async Task PendingReplay_CanReadWorkerReceiptForItsOwnActiveWorkflow()
+    {
+        var repository = new RecordingArrivalRepository(Arrival("previous-request", VehicleArrivalRadarStatus.Pending));
+        var radar = new CountingHandler(request =>
+        {
+            Assert.Equal("?requestId=previous-request", request.RequestUri!.Query);
+            return JsonResponse(200, """{"idempotent":true,"scan":{"state":"scanning","requestId":"previous-request"}}""");
+        }, () => JsonResponse(200, """{"scan":{"state":"scanning","requestId":"previous-request"}}"""));
+        var result = await CreateController(repository, radar).CreateCapture(
+            new ManualCaptureRequest { LicensePlate = "宁A10333F", IdempotencyKey = "pending-own" },
+            CancellationToken.None);
+        var payload = Assert.IsType<ApiResponse<ManualCaptureResponse>>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.True(payload.Data!.Duplicate);
+        Assert.Equal(0, repository.InsertCount);
+        Assert.Equal(1, radar.PostCount);
     }
 
     [Theory]
@@ -1181,6 +1299,16 @@ public sealed class RadarLiveContractTests
         public RecordingArrivalRepository(VehicleArrivalRecord? existing) => _existing = existing;
 
         public int InsertCount { get; private set; }
+        public int DeleteCount { get; private set; }
+        public override bool DeleteUndispatchedManualArrival(long recordId)
+        {
+            Assert.Equal(recordId, _existing!.Id);
+            Assert.Equal("MANUAL", _existing.PlateSource);
+            Assert.Equal(VehicleArrivalRadarStatus.Pending, _existing.RadarStatus);
+            _existing = null;
+            DeleteCount++;
+            return true;
+        }
 
         public bool ClaimResult { get; set; }
         public VehicleDimensionRecord? DimensionRecord { get; set; }
@@ -1247,26 +1375,35 @@ public sealed class RadarLiveContractTests
     private sealed class CountingHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
+        private readonly Func<HttpResponseMessage>? _liveStatus;
 
-        public CountingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) =>
+        public CountingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder, Func<HttpResponseMessage>? liveStatus = null)
+        {
             _responder = responder;
+            _liveStatus = liveStatus;
+        }
 
         public int CallCount { get; private set; }
 
         /// <summary>只统计真正会驱动硬件的 POST，读证据的 GET 不计入。</summary>
         public int PostCount { get; private set; }
+        public Func<Task>? BeforePost { get; init; }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             CallCount++;
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath == "/api/radars/live/status")
+                return _liveStatus?.Invoke() ?? JsonResponse(200, """{"scan":{"state":"idle"}}""");
             if (request.Method == HttpMethod.Post)
             {
                 PostCount++;
+                if (BeforePost is not null)
+                    await BeforePost();
             }
 
-            return Task.FromResult(_responder(request));
+            return _responder(request);
         }
     }
 }

@@ -104,7 +104,7 @@ const API = (function () {
         }
 
         if (!response.ok || result.code !== 200) {
-            throw { code: result.code || response.status, message: result.message || '请求失败' };
+            throw { code: result.code || response.status, message: result.message || '请求失败', data: result.data };
         }
 
         return result;

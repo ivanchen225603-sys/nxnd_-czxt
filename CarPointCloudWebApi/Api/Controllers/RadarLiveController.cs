@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,6 +19,8 @@ public sealed class RadarLiveController(
     ILogger<RadarLiveController> logger) : ControllerBase
 {
     private static readonly Regex IdempotencyKeyRegex = new("^[A-Za-z0-9_\\-:.]{1,64}$", RegexOptions.Compiled);
+    private static readonly SemaphoreSlim[] ManualDispatchGates = Enumerable.Range(0, 64)
+        .Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 
     [HttpGet("status")]
     [RequireRole(Roles = "admin,viewer")]
@@ -57,14 +60,31 @@ public sealed class RadarLiveController(
                 "Idempotency-Key 格式非法，要求 1-64 位字母、数字、下划线、连字符、冒号或点"));
 
         var eventId = $"manual_{idempotencyKey ?? Guid.NewGuid().ToString("N")}";
-        if (idempotencyKey is not null && repository.FindVehicleArrivalByEventId(eventId) is { } replay)
+        // 同键重试须等首次派发落定，避免 Worker 明确拒绝时删除另一个请求还在使用的记录。
+        var gate = ManualDispatchGates[(int)((uint)StringComparer.Ordinal.GetHashCode(eventId) % ManualDispatchGates.Length)];
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            return await CreateOrReplayCaptureAsync(request, licensePlate, eventId, idempotencyKey is not null, cancellationToken);
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task<ActionResult<ApiResponse<ManualCaptureResponse>>> CreateOrReplayCaptureAsync(
+        ManualCaptureRequest request, string licensePlate, string eventId, bool hasIdempotencyKey, CancellationToken cancellationToken)
+    {
+        if (hasIdempotencyKey && repository.FindVehicleArrivalByEventId(eventId) is { } replay)
             return await ReplayAsync(replay, licensePlate, cancellationToken);
+
+        if (await CheckBusyAsync(null, cancellationToken) is { } busy)
+            return busy;
 
         // 车牌输错会覆盖另一辆车的永久空车档案，已有档案时须人工确认。
         if (!request.ConfirmOverwriteEmptyProfile && emptyProfiles.GetByLicensePlate(licensePlate) is { } existingProfile)
-            return Conflict(ApiResponse<ManualCaptureResponse>.Fail(409,
+            return CaptureConflict("empty_profile_exists",
                 $"车牌 {licensePlate} 已存在空车档案（扫描时间 {existingProfile.ScanTime:yyyy-MM-dd HH:mm:ss}）。" +
-                "若本次仍为该车空车扫描，请确认后重试；车牌输错会覆盖另一辆车的永久档案。"));
+                "若本次仍为该车空车扫描，请确认后重试；车牌输错会覆盖另一辆车的永久档案。",
+                existingProfileScanTime: existingProfile.ScanTime.ToString("yyyy-MM-dd HH:mm:ss"));
 
         var now = BusinessClock.Now;
         var workflowId = $"sess_{now:yyyyMMddHHmmssfff}_{Guid.NewGuid().ToString("N")[..12]}";
@@ -89,20 +109,30 @@ public sealed class RadarLiveController(
 
         logger.LogInformation("手动采集已建立流程: workflowId={WorkflowId}, plate={LicensePlate}, operator={Operator}, note={Note}",
             workflowId, licensePlate, CurrentUsername, request.Note);
-        return await DispatchCaptureAsync(inserted.Record, cancellationToken);
+        return await DispatchCaptureAsync(inserted.Record, cancellationToken, newlyInserted: true);
     }
 
     private async Task<ActionResult<ApiResponse<ManualCaptureResponse>>> DispatchCaptureAsync(
-        VehicleArrivalRecord arrival, CancellationToken cancellationToken)
+        VehicleArrivalRecord arrival, CancellationToken cancellationToken, bool newlyInserted = false)
     {
         var workflowId = arrival.SessionId;
-        var response = await RadarScanDispatcher.DispatchAsync(radarClient, repository, arrival.Id, workflowId, cancellationToken);
+        var response = await radarClient.StartScanAsync(workflowId, cancellationToken);
+        var code = ReadString(response.Body, "code");
+        if (response.StatusCode == 409 && code == "busy")
+        {
+            if (newlyInserted && !repository.DeleteUndispatchedManualArrival(arrival.Id))
+                logger.LogWarning("手动忙态拒绝后未删除原记录: workflowId={WorkflowId}", workflowId);
+            return WorkerBusy(ReadString((response.Body as JsonObject)?["scan"], "requestId"));
+        }
+        RadarScanDispatcher.RecordResult(repository, arrival.Id, response);
         if (!response.IsSuccess)
         {
             var status = response.StatusCode is 400 or 409 ? response.StatusCode : StatusCodes.Status502BadGateway;
             var message = response.Body?["message"]?.GetValue<string>() ?? $"雷达服务返回 HTTP {response.StatusCode}";
             logger.LogWarning("手动采集触发雷达失败: workflowId={WorkflowId}, status={StatusCode}, message={Message}",
                 workflowId, response.StatusCode, message);
+            if (status == 409 && (code == "capture_unverified" || message.Contains("无法核实", StringComparison.Ordinal)))
+                return CaptureConflict("capture_unverified", message);
             return StatusCode(status, ApiResponse<ManualCaptureResponse>.Fail(status, message));
         }
 
@@ -196,10 +226,14 @@ public sealed class RadarLiveController(
         VehicleArrivalRecord existing, string licensePlate, CancellationToken cancellationToken)
     {
         if (existing.LicensePlate != licensePlate)
-            return Conflict(ApiResponse<ManualCaptureResponse>.Fail(409,
-                $"相同 Idempotency-Key 已用于车牌 {existing.LicensePlate}，与本次请求的 {licensePlate} 不一致"));
+            return CaptureConflict("idempotency_conflict",
+                $"相同 Idempotency-Key 已用于车牌 {existing.LicensePlate}，与本次请求的 {licensePlate} 不一致");
         if (existing.RadarStatus != VehicleArrivalRadarStatus.Succeeded)
+        {
+            if (await CheckBusyAsync(existing.SessionId, cancellationToken) is { } busy)
+                return busy;
             return await DispatchCaptureAsync(existing, cancellationToken);
+        }
         return Ok(ApiResponse<ManualCaptureResponse>.Success(new ManualCaptureResponse
         {
             WorkflowId = existing.SessionId,
@@ -209,6 +243,37 @@ public sealed class RadarLiveController(
             Message = "该请求已受理，未重复触发采集；请按流程编号查询进度"
         }));
     }
+
+    private async Task<ConflictObjectResult?> CheckBusyAsync(string? workflowId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var status = await radarClient.GetLiveStatusAsync(cancellationToken);
+            var scan = (status.Body as JsonObject)?["scan"];
+            var active = ReadString(scan, "requestId");
+            if (status.IsSuccess && ReadString(scan, "state") == "scanning" && (workflowId is null || active != workflowId))
+                return WorkerBusy(active);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested &&
+            ex is HttpRequestException or OperationCanceledException or JsonException)
+        {
+            logger.LogDebug(ex, "手动采集预查不可用，沿用 Worker 派发结果");
+        }
+        return null;
+    }
+
+    private ConflictObjectResult WorkerBusy(string? activeWorkflowId) =>
+        CaptureConflict("worker_busy", "双雷达正忙于另一车次采集，请稍候或查看当前采集进度", activeWorkflowId);
+
+    private ConflictObjectResult CaptureConflict(string errorCode, string message, string? activeWorkflowId = null,
+        string? existingProfileScanTime = null) =>
+        Conflict(new ApiResponse<ManualCaptureConflict>
+        {
+            Code = 409, Message = message, Data = new(errorCode, activeWorkflowId, existingProfileScanTime)
+        });
+
+    private static string? ReadString(JsonNode? node, string property) =>
+        (node as JsonObject)?[property] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     private ActionResult<ApiResponse<JsonNode>> Relay(RadarWorkerResponse response, string failureMessage)
     {

@@ -286,7 +286,8 @@ public partial class IntegrationRepository
             @"SELECT a.ArrivalTime,a.PlateStatus,p.EnterId,a.SessionId,p.CaptureTime,p.LicensePlate,a.PlateSource
               FROM VehicleArrival a LEFT JOIN LicensePlateRecord p ON p.WorkflowId=a.SessionId
                     AND p.IsSuccess=1 AND p.CameraIdentifier=a.CameraIdentifier AND p.LicensePlate=a.LicensePlate
-              WHERE a.CameraIdentifier=? AND a.SessionId<>? AND a.ArrivalTime BETWEEN ? AND ?",
+              WHERE a.CameraIdentifier=? AND a.SessionId<>? AND a.ArrivalTime BETWEEN ? AND ?
+                    AND (a.PlateSource IS NULL OR a.PlateSource<>'MANUAL' OR a.RadarStatus<>'FAILED')",
             connection, tx) { CommandTimeout = _commandTimeoutSeconds };
         AddVarcharParam(command, "@CameraIdentifier", 64, job.CameraIdentifier, required: true);
         AddVarcharParam(command, "@WorkflowId", 128, job.WorkflowId, required: true);

@@ -142,6 +142,18 @@ public partial class IntegrationRepository
         return cmd.ExecuteNonQuery() == 1;
     }
 
+    /// <inheritdoc />
+    public bool DeleteUndispatchedManualArrival(long recordId)
+    {
+        using var conn = CreateConnection();
+        conn.Open();
+        using var cmd = new DmCommand(
+            "DELETE FROM VehicleArrival WHERE Id=? AND PlateSource='MANUAL' AND RadarStatus='PENDING'", conn)
+        { CommandTimeout = _commandTimeoutSeconds };
+        cmd.Parameters.Add("@Id", DmDbType.Int64).Value = recordId;
+        return cmd.ExecuteNonQuery() == 1;
+    }
+
     private VehicleArrivalRecord? GetVehicleArrivalByEventId(DmConnection conn, string eventId) =>
         ReadVehicleArrival(conn, null, eventId, _commandTimeoutSeconds);
 

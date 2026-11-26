@@ -72,6 +72,8 @@
             <div class="capture-field"><label for="plateInput">车牌号</label><input id="plateInput" class="live-input" type="text" maxlength="32" autocomplete="off" placeholder="请输入本次车辆车牌"></div>
             <button id="btnCapture" class="live-btn primary" type="button">开始采集并计算</button>
             <div id="captureHint" class="banner" role="status" aria-live="polite"></div>
+            <div id="scanBusyHint" class="banner" role="status" aria-live="polite"></div>
+            <button id="btnViewActiveCapture" class="live-btn secondary" type="button" hidden>查看当前采集进度</button>
         </section>
         <div id="previewBanner" class="banner" role="status" aria-live="polite"></div>
         <section class="preview-surface" aria-labelledby="previewTitle">
@@ -127,6 +129,11 @@
             </div>
             <div class="modal-body">
                 <div id="captureBanner" class="banner"></div>
+                <button id="btnViewActiveCaptureModal" class="live-btn secondary" type="button" hidden>查看当前采集进度</button>
+                <div id="confirmOverwriteAction" hidden>
+                    <p id="existingProfileScanTime"></p>
+                    <button id="btnConfirmOverwrite" class="live-btn danger" type="button">确认覆盖空车档案并采集</button>
+                </div>
 
                 <!--
                     仅在服务端明确表示"无法核实上一次是否已采集"时展开。
@@ -155,11 +162,11 @@
     </div>
 
     <script src="js/api-config.js"></script>
-    <script src="js/api-client.js"></script>
+    <script src="js/api-client.js?v=20261127-capture"></script>
     <script src="js/auth-guard.js"></script>
     <script src="js/nav.js?v=20261012-1"></script>
     <script src="js/point-cloud-gl.js?v=20261102-1"></script>
     <script src="js/pcd-parser.js"></script>
-    <script src="js/radar-live.js?v=20261106-result"></script>
+    <script src="js/radar-live.js?v=20261127-capture"></script>
 </body>
 </html>
