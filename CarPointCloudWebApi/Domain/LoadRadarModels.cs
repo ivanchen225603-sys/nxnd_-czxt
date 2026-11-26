@@ -43,11 +43,19 @@ public sealed record LoadBaselineUse(string SourceChannelId, string SourceCalibr
     double DxM, double DyM, double YawSlope, double YawPivotYM, LoadBaselinePose? Pose);
 public sealed record LoadBaselinePose(double[] Left, double[] Right, double XLeft, double XRight, double YMid);
 
+public sealed record LoadCargoEstimate(
+    decimal? BoxCapacityM3,
+    decimal? LoadRatio,
+    string LoadLevel,
+    string LoadLevelLabel);
+
 public sealed record LoadMeasurementRecord(string PassageKey, string PayloadHash,
     LoadMeasurementInput Measurement, DateTimeOffset ReceivedAt, LoadPassageBinding? Binding = null,
     LoadCoalPublication? Publication = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    LoadVolumeRevision? LatestRevision = null);
+    LoadVolumeRevision? LatestRevision = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    LoadCargoEstimate? CargoEstimate = null);
 
 public sealed record LoadPassageBinding(string PassageKey, string WorkflowId, string LicensePlate,
     string CameraIdentifier, string VehicleIdentity, string Actor, string Reason, DateTimeOffset BoundAt);

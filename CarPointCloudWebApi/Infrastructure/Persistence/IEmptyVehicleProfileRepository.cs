@@ -8,4 +8,9 @@ public interface IEmptyVehicleProfileRepository
     /// <param name="licensePlate">已规范化的车牌号。</param>
     /// <returns>空车档案及尺寸明细；没有有效档案时返回 <see langword="null"/>。</returns>
     EmptyVehicleProfileRecord? GetByLicensePlate(string licensePlate);
+
+    /// <summary>批量读取展示装载率所需的车厢内尺寸。</summary>
+    IReadOnlyDictionary<string, EmptyVehicleProfileRecord> GetDimensionsByLicensePlates(IReadOnlyList<string> licensePlates) =>
+        licensePlates.Select(GetByLicensePlate).OfType<EmptyVehicleProfileRecord>()
+            .ToDictionary(profile => profile.LicensePlate, StringComparer.Ordinal);
 }

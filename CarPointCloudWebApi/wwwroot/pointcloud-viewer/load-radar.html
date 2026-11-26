@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="css/style.css?v=9">
     <link rel="stylesheet" href="css/load-radar.css?v=20260928-3">
     <link rel="stylesheet" href="css/admin-shell.css?v=20261012-1">
-    <link rel="stylesheet" href="css/load-radar-overview.css?v=20261029-1">
+    <link rel="stylesheet" href="css/load-radar-overview.css?v=20261127-cargo-level">
     <link rel="stylesheet" href="css/page-shell.css?v=20261029-1">
 </head>
 <body class="load-radar-page">
@@ -95,12 +95,16 @@
             <button type="submit">查询</button>
         </form>
         <p id="historySummary" role="status">尚未查询</p>
-        <div class="history-scroll"><table><thead><tr><th>测量时间</th><th>通道</th><th>车牌</th><th>状态</th><th>体积 m³</th><th>操作</th></tr></thead><tbody id="loadHistoryRows"></tbody></table></div>
+        <div class="history-scroll"><table><thead><tr><th>测量时间</th><th>通道</th><th>车牌</th><th>状态</th><th>装载情况</th><th>体积 m³</th><th>操作</th></tr></thead><tbody id="loadHistoryRows"></tbody></table></div>
         <button id="loadHistoryMore" type="button" disabled>加载更多</button>
         <section id="historyDetail" class="history-detail" hidden aria-label="历史测量详情">
             <h3>历史结果 · 非实时</h3>
             <p id="historyResultStatus" role="status"></p>
-            <p>车牌：<span id="historyResultPlate">--</span>　体积：<span id="historyResultVolume">--</span> m³</p>
+            <p class="history-result-metrics">
+                <span>车牌：<span id="historyResultPlate">--</span></span>
+                <span>装载情况：<span id="historyResultCargo">--</span></span>
+                <span>体积：<span id="historyResultVolume">--</span> m³</span>
+            </p>
             <p id="historyResultTime"></p><p id="historyResultNote"></p>
             <canvas id="historyCanvas" class="cloud" aria-label="历史测量点云，非实时"></canvas>
             <p class="hint">历史点云，非实时 · 拖动旋转 · 滚轮缩放 · 双击复位</p>
@@ -111,6 +115,6 @@
     <script src="js/auth-guard.js"></script>
     <script src="js/nav.js?v=20261012-1"></script>
     <script src="js/load-radar-cloud.js?v=20261102-1"></script>
-    <script src="js/load-radar.js?v=20261103-1"></script>
+    <script src="js/load-radar.js?v=20261127-cargo-level"></script>
 </body>
 </html>

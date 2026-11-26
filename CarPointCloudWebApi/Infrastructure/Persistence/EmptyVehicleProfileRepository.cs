@@ -43,6 +43,39 @@ public sealed class EmptyVehicleProfileRepository : IEmptyVehicleProfileReposito
         return record;
     }
 
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, EmptyVehicleProfileRecord> GetDimensionsByLicensePlates(IReadOnlyList<string> licensePlates)
+    {
+        var profiles = new Dictionary<string, EmptyVehicleProfileRecord>(StringComparer.Ordinal);
+        if (licensePlates.Count == 0) return profiles;
+
+        using var connection = new DmConnection(_connectionString);
+        connection.Open();
+        var placeholders = string.Join(", ", Enumerable.Repeat("?", licensePlates.Count));
+        using var command = new DmCommand($"""
+            SELECT p.LicensePlate, p.TrailerLength, p.TrailerWidth, p.TrailerBodyHeight, r.DetectStatus
+            FROM EmptyVehicleProfile p JOIN VehicleDimensionRecord r ON r.Id = p.DimensionRecordId
+            WHERE p.LicensePlate IN ({placeholders})
+            """, connection)
+        { CommandTimeout = _commandTimeoutSeconds };
+        for (var index = 0; index < licensePlates.Count; index++)
+            command.Parameters.Add($"@Plate{index}", DmDbType.VarChar, 32).Value = licensePlates[index];
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var plate = reader.GetString(0);
+            profiles.Add(plate, new EmptyVehicleProfileRecord
+            {
+                LicensePlate = plate,
+                DetectStatus = reader.GetString(reader.GetOrdinal("DetectStatus")),
+                TrailerLength = GetNullableDecimal(reader, "TrailerLength"),
+                TrailerWidth = GetNullableDecimal(reader, "TrailerWidth"),
+                TrailerBodyHeight = GetNullableDecimal(reader, "TrailerBodyHeight")
+            });
+        }
+        return profiles;
+    }
+
     private static EmptyVehicleProfileRecord Map(DbDataReader reader) => new()
     {
         DetectStatus = reader.GetString(reader.GetOrdinal("DetectStatus")),

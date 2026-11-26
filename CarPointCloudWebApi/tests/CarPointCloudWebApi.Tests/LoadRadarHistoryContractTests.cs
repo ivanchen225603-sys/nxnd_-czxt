@@ -4,8 +4,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CarPointCloudWebApi.Tests;
@@ -47,18 +47,60 @@ public sealed class LoadRadarHistoryContractTests
         Assert.Null(fixture.Repository.LastArguments);
     }
 
+    [Fact]
+    public async Task Display_queries_resolve_profile_DI_and_batch_distinct_plates_but_raw_read_is_unchanged()
+    {
+        using var fixture = new Fixture(enableCargo: true);
+        using var history = JsonDocument.Parse(await fixture.Client.GetStringAsync("/api/v1/load-radar/history?take=3"));
+        var rows = history.RootElement.GetProperty("data");
+        Assert.Equal(3, rows.GetArrayLength());
+        Assert.Equal("half", rows[0].GetProperty("cargoEstimate").GetProperty("loadLevel").GetString());
+        Assert.Equal(0.55m, rows[1].GetProperty("cargoEstimate").GetProperty("loadRatio").GetDecimal());
+        Assert.Equal("loaded_unknown_capacity", rows[2].GetProperty("cargoEstimate").GetProperty("loadLevel").GetString());
+        Assert.Equal(new[] { "宁A20181", "宁A20182" }, Assert.Single(fixture.Profiles.Batches));
+        Assert.Empty(rows[0].GetProperty("measurement").GetProperty("points").EnumerateArray());
+
+        using var detail = JsonDocument.Parse(await fixture.Client.GetStringAsync("/api/v1/load-radar/measurements/m"));
+        var data = detail.RootElement.GetProperty("data");
+        var cargo = data.GetProperty("cargoEstimate");
+        Assert.Equal(0.55m, cargo.GetProperty("loadRatio").GetDecimal());
+        Assert.Equal(4, cargo.EnumerateObject().Count());
+        Assert.Equal(27.5m, data.GetProperty("measurement").GetProperty("volumeM3").GetDecimal());
+        Assert.Single(data.GetProperty("measurement").GetProperty("points").EnumerateArray());
+        Assert.Equal(2, fixture.Profiles.Batches.Count);
+        Assert.Null(fixture.Service.Get("m").CargoEstimate);
+        Assert.Equal(2, fixture.Profiles.Batches.Count);
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly TestServer _server;
         public HttpClient Client { get; }
         public HistoryRepository Repository { get; }
-        public Fixture()
+        public CargoProfiles Profiles { get; } = new();
+        public LoadRadarService Service => _server.Services.GetRequiredService<LoadRadarService>();
+        public Fixture(bool enableCargo = false)
         {
             var repository = DispatchProxy.Create<ILoadRadarRepository, HistoryRepository>();
             Repository = (HistoryRepository)repository;
+            if (enableCargo)
+            {
+                var row = Repository.Row;
+                var binding = new LoadPassageBinding("p", "workflow", "宁A20181", "CAM_001", "vehicle", "test", "", DateTimeOffset.UtcNow);
+                Repository.Rows = [
+                    row with { Binding = binding },
+                    row with { Binding = binding, Measurement = row.Measurement with { MeasurementId = "m-2" } },
+                    row with { Binding = binding with { LicensePlate = "宁A20182" }, Measurement = row.Measurement with { MeasurementId = "m-3" } }
+                ];
+            }
             _server = new TestServer(new WebHostBuilder().ConfigureServices(services =>
             {
-                services.AddSingleton(Options.Create(new LoadRadarOptions { Enabled = true }));
+                var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["LoadRadar:Enabled"] = "true"
+                }).Build();
+                services.Configure<LoadRadarOptions>(configuration.GetSection("LoadRadar"));
+                if (enableCargo) services.AddSingleton<IEmptyVehicleProfileRepository>(Profiles);
                 services.AddSingleton(repository);
                 services.AddSingleton<IIntegrationRepository>(new NullIntegrationRepository());
                 services.AddSingleton<LoadRadarAssetStore>();
@@ -82,20 +124,41 @@ public sealed class LoadRadarHistoryContractTests
         public void Dispose() { Client.Dispose(); _server.Dispose(); }
     }
 
+    private sealed class CargoProfiles : IEmptyVehicleProfileRepository
+    {
+        public List<string[]> Batches { get; } = [];
+        public EmptyVehicleProfileRecord? GetByLicensePlate(string licensePlate) => throw new NotSupportedException();
+        public IReadOnlyDictionary<string, EmptyVehicleProfileRecord> GetDimensionsByLicensePlates(IReadOnlyList<string> licensePlates)
+        {
+            Batches.Add(licensePlates.ToArray());
+            return new Dictionary<string, EmptyVehicleProfileRecord>
+            {
+                ["宁A20181"] = new()
+                {
+                    LicensePlate = "宁A20181", TrailerLength = 1000m, TrailerWidth = 250m, TrailerBodyHeight = 200m
+                }
+            };
+        }
+    }
+
     public class HistoryRepository : DispatchProxy
     {
         public object?[]? LastArguments;
         public readonly LoadMeasurementRecord Row = new("p", "hash", new LoadMeasurementInput
         {
             MeasurementId = "m",
+            ChannelId = "CH1", Verdict = "loaded", VolumeStatus = "success", VolumeM3 = 27.5m,
             Points = [[1, 2, 3]],
             MeasuredAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z")
         }, DateTimeOffset.UtcNow);
+        public IReadOnlyList<LoadMeasurementRecord>? Rows;
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
+            if (method?.Name == nameof(ILoadRadarRepository.GetMeasurement))
+                return Rows?.SingleOrDefault(row => row.Measurement.MeasurementId == (string?)args![0]);
             if (method?.Name != nameof(ILoadRadarRepository.GetHistory)) throw new NotSupportedException();
             LastArguments = args;
-            return new[] { Row };
+            return Rows ?? new[] { Row };
         }
     }
 }

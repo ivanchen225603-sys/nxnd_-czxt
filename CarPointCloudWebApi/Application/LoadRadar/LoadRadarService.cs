@@ -8,7 +8,8 @@ namespace CarPointCloudWebApi.Application;
 
 /// <summary>载货雷达业务边界；不触发双雷达扫描，不按最近车牌猜测流程。</summary>
 public sealed class LoadRadarService(ILoadRadarRepository repository, IIntegrationRepository integration,
-    IOptions<LoadRadarOptions> options, LoadRadarAssetStore assets)
+    IOptions<LoadRadarOptions> options, LoadRadarAssetStore assets,
+    IEmptyVehicleProfileRepository? emptyProfiles = null)
 {
     public LoadRadarOptions Options => options.Value;
 
@@ -110,6 +111,12 @@ public sealed class LoadRadarService(ILoadRadarRepository repository, IIntegrati
         return repository.GetMeasurement(id) ?? throw new LoadRadarException(404, "测量不存在");
     }
 
+    public LoadMeasurementRecord GetForDisplay(string id)
+    {
+        var row = Get(id);
+        return AttachCargoEstimate(row, ReadCargoProfiles([row]));
+    }
+
     public IReadOnlyList<LoadMeasurementRecord> History(string? nodeId, string? channelId,
         string? licensePlate, string? beforeId, int take, DateTimeOffset? from = null, DateTimeOffset? to = null)
     {
@@ -121,13 +128,29 @@ public sealed class LoadRadarService(ILoadRadarRepository repository, IIntegrati
         if (licensePlate is not null) Text(licensePlate, "licensePlate", 32);
         if (from > to) throw new LoadRadarException(400, "开始时间不能晚于结束时间");
         // 列表不重复运输大点云；选中测量后通过详情接口按需读取。
-        return repository.GetHistory(nodeId, channelId, licensePlate, beforeId, take, from, to)
-            .Select(row => row with
+        var rows = repository.GetHistory(nodeId, channelId, licensePlate, beforeId, take, from, to);
+        var profiles = ReadCargoProfiles(rows);
+        return rows.Select(row => AttachCargoEstimate(row with
             {
                 Measurement = row.Measurement with { Points = [] },
                 LatestRevision = row.LatestRevision is { } revision
                     ? revision with { Calculation = revision.Calculation with { Points = [] } } : null
-            }).ToArray();
+            }, profiles)).ToArray();
+    }
+
+    private IReadOnlyDictionary<string, EmptyVehicleProfileRecord>? ReadCargoProfiles(IReadOnlyList<LoadMeasurementRecord> rows)
+    {
+        if (emptyProfiles is null) return null;
+        var plates = rows.Select(row => row.Binding?.LicensePlate).OfType<string>()
+            .Where(plate => !string.IsNullOrWhiteSpace(plate)).Distinct(StringComparer.Ordinal).ToArray();
+        return plates.Length == 0 ? null : emptyProfiles.GetDimensionsByLicensePlates(plates);
+    }
+
+    private static LoadMeasurementRecord AttachCargoEstimate(LoadMeasurementRecord row,
+        IReadOnlyDictionary<string, EmptyVehicleProfileRecord>? profiles)
+    {
+        var profile = row.Binding is { } binding ? profiles?.GetValueOrDefault(binding.LicensePlate) : null;
+        return row with { CargoEstimate = LoadCargoEstimator.Estimate(row, profile) };
     }
 
     public LoadPassageBinding Bind(string id, LoadBindRequest request, string actor)

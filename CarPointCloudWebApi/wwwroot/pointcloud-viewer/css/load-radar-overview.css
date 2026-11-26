@@ -68,19 +68,15 @@ body.load-radar-page {
     gap: 6px;
 }
 .load-radar-page .kpis {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr);
-    gap: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 8px;
     padding: 12px 6px 8px;
     align-items: start;
 }
 .load-radar-page .kpi {
-    padding: 0 10px;
+    min-width: 0;
+    padding: 0 6px;
     border-radius: 0;
-    border-left: 1px solid var(--border-color);
-}
-.load-radar-page .kpi:first-child {
-    padding-left: 0;
-    border-left: 0;
 }
 .load-radar-page .kpi .k {
     font-size: 12px;
@@ -110,8 +106,7 @@ body.load-radar-page {
     color: #92400e;
 }
 .load-radar-page .kpi.time {
-    grid-column: auto;
-    padding: 0 0 0 10px;
+    grid-column: span 2;
 }
 .load-radar-page .kpi.time .v {
     font-size: 12px;
@@ -214,6 +209,11 @@ body.load-radar-page {
 .load-radar-page .lane-log td:last-child {
     white-space: normal;
 }
+.load-radar-page .history-result-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+}
 .load-radar-page .runtime-log-section {
     min-width: 0;
     border-bottom: 1px solid var(--border-color);
@@ -272,11 +272,6 @@ body.load-radar-page {
 @media (max-width: 1180px) {
     .load-radar-page .kpis {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        row-gap: 12px;
-    }
-    .load-radar-page .kpi-status {
-        padding-left: 0;
-        border-left: 0;
     }
 }
 @media (max-width: 760px) {

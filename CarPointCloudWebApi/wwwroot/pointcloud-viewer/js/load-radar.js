@@ -44,10 +44,24 @@
         const value = number(m.volumeM3);
         return value;
     }
+    const loadPercentage = new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 2 });
+    function cargoText(row, m) {
+        const est = row?.cargoEstimate;
+        if (est && typeof est.loadLevelLabel === 'string' && est.loadLevelLabel) {
+            if (typeof est.loadRatio === 'number' && Number.isFinite(est.loadRatio) && est.loadRatio >= 0) {
+                return est.loadLevelLabel + ' · ' + loadPercentage.format(est.loadRatio);
+            }
+            return est.loadLevelLabel;
+        }
+        if (m?.verdict === 'empty') return '空车';
+        if (m?.verdict === 'loaded') return '已载货';
+        return '--';
+    }
     function laneLabel(channelId) { return FIXED_CHANNELS.find(x => x.id === channelId)?.label || '通道'; }
     async function read(path) { return (await API.request(ROOT + path)).data; }
     function resetResult(v, status) {
         v.status.textContent = status; v.plate.textContent = '--'; v.volume.textContent = '--';
+        if (v.cargo) v.cargo.textContent = '--';
         v.time.textContent = '--'; v.note.textContent = '';
         if (v.estimate) v.estimate.hidden = true;
         v.volume.className = 'v result-volume';
@@ -58,6 +72,7 @@
         v.status.textContent = measurementStatus(m);
         v.plate.textContent = row.binding?.licensePlate || '等待车牌';
         v.volume.textContent = volumeText(m);
+        if (v.cargo) v.cargo.textContent = cargoText(row, m);
         v.time.textContent = when(m.measuredAt);
         v.note.textContent = row.latestRevision ? '已按CH4当日空车基线重新计算并保存'
             : row.publication ? '煤量已保存'
@@ -87,7 +102,7 @@
         v.verdict = element('div', undefined, 'verdict is-wait');
         v.status = element('div', '等待雷达数据', 'big'); v.status.setAttribute('role', 'status');
         v.note = element('div', '', 'sub'); v.verdict.append(v.status);
-        for (const [field, label] of [['plate', '车牌'], ['volume', '载货体积 m³'], ['time', '测量时间']]) {
+        for (const [field, label] of [['plate', '车牌'], ['cargo', '装载情况'], ['volume', '载货体积 m³'], ['time', '测量时间']]) {
             const kpi = element('div', undefined, 'kpi kpi-' + field + (field === 'time' ? ' time' : ''));
             v[field] = element('div', '--', 'v result-' + field); kpi.append(element('div', label, 'k'), v[field]); kpis.append(kpi);
             if (field === 'volume') {
@@ -154,7 +169,7 @@
         logView.scroll = element('div', undefined, 'log-table-scroll');
         const table = element('table'); table.setAttribute('aria-label', '车辆测量运行记录');
         const head = element('thead'), tr = element('tr');
-        for (const label of ['测量时间', '通道', '车牌', '运行情况', '体积 m³', '说明']) {
+        for (const label of ['测量时间', '通道', '车牌', '运行情况', '装载情况', '体积 m³', '说明']) {
             const th = element('th', label); th.setAttribute('scope', 'col'); tr.append(th);
         }
         head.append(tr); logView.body = element('tbody', undefined, 'lane-log-rows'); table.append(head, logView.body);
@@ -294,7 +309,7 @@
         logView.body.replaceChildren();
         if (!rows.length) {
             const row = element('tr'), cell = element('td', busy ? '正在读取车辆记录…' : '暂无符合条件的车辆记录');
-            cell.setAttribute('colspan', '6'); cell.className = 'log-empty'; row.append(cell); logView.body.append(row); return;
+            cell.setAttribute('colspan', '7'); cell.className = 'log-empty'; row.append(cell); logView.body.append(row); return;
         }
         for (const { record, view } of rows) {
             const m = record.latestRevision?.calculation || record.measurement, row = element('tr');
@@ -306,6 +321,7 @@
             badge.className = 'run-state' + (m.verdict === 'unknown'
                 ? ' is-warn' : m.verdict === 'empty' ? ' is-empty' : m.verdict === 'loaded' ? ' is-loaded' : '');
             state.append(badge); row.append(state);
+            row.append(element('td', cargoText(record, m)));
             row.append(element('td', volumeText(m)));
             const reason = typeof m.reason === 'string' && m.reason.trim() ? m.reason.trim() : '—';
             const detail = element('td', reason); detail.setAttribute('title', reason); row.append(detail);
@@ -525,13 +541,13 @@
         for (const row of records) {
             const m = row.latestRevision?.calculation || row.measurement, tr = element('tr'), lane = lanes.get(laneKey(m));
             const volume = volumeText(m, true);
-            for (const value of [when(m.measuredAt), lane?.name || m.channelId, row.binding?.licensePlate || '未取得', measurementStatus(m), volume]) tr.append(element('td', value));
+            for (const value of [when(m.measuredAt), lane?.name || m.channelId, row.binding?.licensePlate || '未取得', measurementStatus(m), cargoText(row, m), volume]) tr.append(element('td', value));
             const td = element('td'), button = element('button', '查看'); button.type = 'button';
             button.addEventListener('click', () => selectMeasurement(m.measurementId));
             td.append(button); tr.append(td); dom.loadHistoryRows.append(tr);
         }
         if (!records.length) {
-            const tr = element('tr'), td = element('td', emptyMessage); td.colSpan = 6; tr.append(td); dom.loadHistoryRows.append(tr);
+            const tr = element('tr'), td = element('td', emptyMessage); td.colSpan = 7; tr.append(td); dom.loadHistoryRows.append(tr);
         }
     }
     function queryString() {
@@ -596,7 +612,8 @@
             dom.historyDetail.hidden = false;
             if (!historyCloud) historyCloud = makeCloud(dom.historyCanvas, dom.historyResultNote);
             historyCloud.clear(); historyCloud.setBounds(null); historyCloud.setPoints(row.measurement.points || []);
-            showRecord({status: dom.historyResultStatus, plate: dom.historyResultPlate, volume: dom.historyResultVolume,
+            showRecord({status: dom.historyResultStatus, plate: dom.historyResultPlate, cargo: dom.historyResultCargo,
+                volume: dom.historyResultVolume,
                 time: dom.historyResultTime, note: dom.historyResultNote}, row);
             dom.historySummary.textContent = '历史点云 · 非实时';
         } catch (_) { if (!stopped && generation === detailGeneration) dom.historySummary.textContent = '点云读取失败，请重试'; }
@@ -606,7 +623,7 @@
             'liveLayout', 'runLogs', 'laneLogs',
             'openHistory', 'historyDialog', 'closeHistory', 'loadHistoryForm', 'filterPlate', 'filterChannel',
             'filterFrom', 'filterTo', 'historySummary', 'loadHistoryRows', 'loadHistoryMore', 'historyDetail',
-            'historyResultStatus', 'historyResultPlate', 'historyResultVolume', 'historyResultTime', 'historyResultNote', 'historyCanvas']) dom[id] = document.getElementById(id);
+            'historyResultStatus', 'historyResultPlate', 'historyResultCargo', 'historyResultVolume', 'historyResultTime', 'historyResultNote', 'historyCanvas']) dom[id] = document.getElementById(id);
         dom.laneTabs.append(element('span', '通道', 'lbl'));
         allTab = element('button', '全部', 'tab on'); allTab.type = 'button'; allTab.setAttribute('aria-pressed', 'true');
         allTab.addEventListener('click', () => selectLane('')); dom.laneTabs.append(allTab);

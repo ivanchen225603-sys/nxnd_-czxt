@@ -47,14 +47,12 @@ public readonly struct LoadRadarNumber
         value is { } number && number.CompareThreshold(minimum) >= 0 &&
         (maximum is null || number.CompareThreshold(maximum.Value) <= 0);
 
-    public decimal RoundCoalVolume()
-    {
-        // 仅对通过体积范围校验的数值调用；不能用 (decimal)double 的 15 位隐式舍入。
-        var value = usesDouble
-            ? decimal.Parse(doubleValue.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture)
-            : decimalValue;
-        return decimal.Round(value, 1, MidpointRounding.AwayFromZero);
-    }
+    // 用于经体积范围校验的数值。保留 decimal 分支，不通过 double 做来回转换。
+    internal decimal ToDecimalForVolume() => usesDouble
+        ? decimal.Parse(doubleValue.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture)
+        : decimalValue;
+
+    public decimal RoundCoalVolume() => decimal.Round(ToDecimalForVolume(), 1, MidpointRounding.AwayFromZero);
 
     internal void Write(Utf8JsonWriter writer)
     {

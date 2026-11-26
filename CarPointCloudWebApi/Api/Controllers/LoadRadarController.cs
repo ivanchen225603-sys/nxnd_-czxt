@@ -25,7 +25,7 @@ public sealed class LoadRadarController(LoadRadarService service, LoadRadarLiveC
         Ok(ApiResponse<object>.Success(service.History(nodeId, channelId, licensePlate, beforeId, take, from, to)));
 
     [HttpGet("measurements/{id}")]
-    public IActionResult Measurement(string id) => Ok(ApiResponse<object>.Success(service.Get(id)));
+    public IActionResult Measurement(string id) => Ok(ApiResponse<object>.Success(service.GetForDisplay(id)));
 
     [HttpGet("measurements/{id}/revisions")]
     public IActionResult Revisions(string id) => Ok(ApiResponse<object>.Success(service.Revisions(id)));

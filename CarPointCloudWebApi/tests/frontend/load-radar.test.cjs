@@ -55,12 +55,12 @@ function harness() {
         tick(ms = 4000) { now += ms; timers.filter(t => t.active).forEach(t => t.fn()); },
         click(id) { return get(id).handlers.click(); },
         submit() { get('loadHistoryForm').handlers.submit({ preventDefault() {} }); },
-        view(index = 0) { get('loadHistoryRows').children[index].children[5].children[0].handlers.click(); },
+        view(index = 0) { get('loadHistoryRows').children[index].children[6].children[0].handlers.click(); },
         select(index = -1) { get('laneTabs').children[index + 2].handlers.click(); },
         card(index = 0) {
             const node = get('loadLanes').children[index];
             return { node, status: find(node, 'big'), note: find(node, 'sub'), plate: find(node, 'result-plate'),
-                volume: find(node, 'result-volume'), time: find(node, 'result-time'), freeze: find(node, 'freeze'),
+                cargo: find(node, 'result-cargo'), volume: find(node, 'result-volume'), time: find(node, 'result-time'), freeze: find(node, 'freeze'),
                 canvasStatus: find(node, 'canvas-status'), badge: find(node, 'badge'), estimate: find(node, 'volume-estimate') };
         },
         log(index = 0) {
@@ -115,7 +115,9 @@ if (realApiFixture) test('真实测试库 API 回执在管理页按原字段显�
     const cells = h.get('loadHistoryRows').children[0].children;
     assert.equal(cells[2].textContent, row.binding.licensePlate);
     assert.equal(cells[3].textContent, '空车');
-    assert.equal(cells[4].textContent, '--');
+    assert.equal(cells[4].textContent, '空车');
+    assert.equal(cells[5].textContent, '--');
+    assert.equal(cells.length, 7);
 });
 async function state(h, items = [], logRows = {}, autoResolveLogs = true) {
     h.take('/state').resolve({ data: { enabled: true, lanes: items } }); await flush();
@@ -290,11 +292,11 @@ test('全部视图按 nodeId+channelId 分别读取逐车日志，并正确绑�
     const logRows = h.log().rows.map(row => row.children.map(cell => cell.textContent));
     assert.equal(logRows.length, 4);
     assert.deepEqual(logRows.map(row => row[1]), ['通道-CH1', '通道-CH2', '通道-CH3', '通道-CH4']);
-    assert.deepEqual(logRows[0].slice(2), ['宁A03722', '计算完成', '9.000', '样例说明-1']);
+    assert.deepEqual(logRows[0].slice(2), [samples[0].binding.licensePlate, '计算完成', '已载货', '9.000', '样例说明-1']);
     assert.equal(h.log().feedback.textContent,
         '最近更新 ' + new Date(Date.now()).toLocaleString('zh-CN', { hour12: false }));
-    assert.deepEqual(logRows[1].slice(2), ['宁A68461', '空车', '--', '样例说明-2']);
-    assert.deepEqual(logRows[2].slice(2), ['宁A86856', '计算完成', '12.345', '样例说明-3']);
+    assert.deepEqual(logRows[1].slice(2), [samples[1].binding.licensePlate, '空车', '空车', '--', '样例说明-2']);
+    assert.deepEqual(logRows[2].slice(2), [samples[2].binding.licensePlate, '计算完成', '已载货', '12.345', '样例说明-3']);
     assert.equal(logRows[3][3], '无法确认载货状态');
 });
 test('单车道选择保留统一日志控件，日志只显示所选车道', async () => {
@@ -602,4 +604,46 @@ test('后台标签页暂停 /state 轮询，回到前台立即补一次并恢复
     await state(h, [lane('N1', 'CH1', 'm1')]);
     h.tick();
     assert.equal(states(), 1, '回到前台后应恢复周期轮询');
+});
+
+test('实时卡片、运行记录与历史弹窗展示装载分级和实测体积，体积缺测时显示占位符', async () => {
+    const h = harness();
+    await state(h, [lane('N1', 'CH1', 'm-half')], {}, false);
+    const half = record('m-half', { channelId: 'CH1', volumeM3: 27.5 });
+    half.binding.licensePlate = '宁A88801';
+    half.cargoEstimate = {
+        boxCapacityM3: 50, loadRatio: 0.55, loadLevel: 'half',
+        loadLevelLabel: '半载'
+    };
+    const emptyRow = record('m-empty', { channelId: 'CH1', verdict: 'empty', volumeStatus: 'unavailable', volumeM3: null });
+    emptyRow.binding.licensePlate = '宁A88802';
+    emptyRow.cargoEstimate = {
+        boxCapacityM3: 50, loadRatio: null, loadLevel: 'empty',
+        loadLevelLabel: '空车'
+    };
+    h.take('/measurements/m-half').resolve({ data: half });
+    h.take('channelId=CH1').resolve({ data: [half, emptyRow] });
+    await flush();
+
+    const card = h.card(0);
+    assert.equal(card.cargo.textContent, '半载 · 55%');
+    assert.equal(card.volume.textContent, '27.500');
+
+    const logRows = h.log().rows.map(r => r.children.map(c => c.textContent));
+    assert.equal(logRows[0][4], '半载 · 55%');
+    assert.equal(logRows[0][5], '27.500');
+    assert.equal(logRows[1][4], '空车');
+    assert.equal(logRows[1][5], '--');
+    assert.deepEqual(logRows.map(row => row.length), [7, 7]);
+
+    await history(h, [half, emptyRow]);
+    const historyRows = h.get('loadHistoryRows').children.map(r => r.children.map(c => c.textContent));
+    assert.deepEqual(historyRows[0].slice(4, 6), ['半载 · 55%', '27.500']);
+    assert.deepEqual(historyRows[1].slice(4, 6), ['空车', '--']);
+    assert.deepEqual(historyRows.map(row => row.length), [7, 7]);
+    h.view();
+    h.take('/measurements/m-half').resolve({ data: half });
+    await flush();
+    assert.equal(h.get('historyResultCargo').textContent, '半载 · 55%');
+    assert.equal(h.get('historyResultVolume').textContent, '27.500');
 });
