@@ -3242,20 +3242,24 @@ def compute_volume(baseline: Optional[EmptyBaseline], loaded: Optional[LoadedRes
                    fill_check: bool = True,
                    enter_extra: Optional[Sequence[np.ndarray]] = None,
                    fill_bound: bool = False,
-                   shared_baseline: bool = False
+                   shared_baseline: bool = False,
+                   *,
+                   verified_floor_box: bool = False
                    ) -> VolumeResult:
     """计算柱状积分估计；任何中间数值溢出均拒绝，不转成零货高。
 
     fill_check：做不做外推检验（见 _fill_holdout，误差估计用）；候选扫描与扰动重算传 False 省时间。
     enter_extra：配好位置的进场帧（register_enter_frames 的 clouds），只补停稳帧没测到的格；默认不用。
-    fill_bound：补洞后把未测格夹进视线上限与坡度包络（见 app/occlusion_fill.py）；默认不用，服务开。"""
+    fill_bound：补洞后把未测格夹进视线上限与坡度包络（见 app/occlusion_fill.py）；默认不用，服务开。
+    verified_floor_box：仅在调用方已核实基线盒的 XY 边界就是完整底板边界时传 True。
+    仅用于完整底板的回退积分路径，普通 ROI 和采样范围不能用作已核实的边界。"""
     try:
         with np.errstate(over="raise", invalid="raise", divide="raise"):
             return _compute_volume_impl(baseline, loaded, voxel, bed_z,
                                         bed_shift_max_m, fill_holes, floor_band_m,
                                         dy, loaded_extra, bed_evidence, bed_scope, volume_context, volume_scope,
                                         dx, pose, yaw, inner, surface_stat, fill_check, enter_extra,
-                                        fill_bound, shared_baseline)
+                                        fill_bound, shared_baseline, verified_floor_box=verified_floor_box)
     except (FloatingPointError, OverflowError):
         return VolumeResult(voxel_size=voxel, message=R_VOLUME_SKIPPED,
                             text=R_VOLUME_SKIPPED + "（中间数值运算非有限）")
@@ -3279,7 +3283,9 @@ def _compute_volume_impl(baseline: Optional[EmptyBaseline], loaded: Optional[Loa
                    fill_check: bool = True,
                    enter_extra: Optional[Sequence[np.ndarray]] = None,
                    fill_bound: bool = False,
-                   shared_baseline: bool = False
+                   shared_baseline: bool = False,
+                   *,
+                   verified_floor_box: bool = False
                    ) -> VolumeResult:
     """
     载货体积 = Σ 单元面积 ×（装货后的顶面高度 - 空车时的底板高度）。
@@ -3794,9 +3800,6 @@ def _compute_volume_impl(baseline: Optional[EmptyBaseline], loaded: Optional[Loa
                 #   直接取剪切后点的 x 外包，会把两侧的三角形包进盒子、补洞时填成煤
                 #   （面积约 斜率 x 车长^2：0.5° 的 11 m 车厢约 1 m^2；合成车厢实测多算 4%）。
                 #   没补偏航时 yaw_k = 0，下面与原来逐位相同。
-                ux = bc[:, 0] - yaw_k * (bc[:, 1] - yaw_piv)
-                bx0, bx1 = float(ux[bed_pt].min()), float(ux[bed_pt].max())
-                by0, by1 = float(bc[bed_pt, 1].min()), float(bc[bed_pt, 1].max())
                 # ▲ y 向的盒子曾经想改成"由货自己的范围定" —— **实测更糟，已回退**。
                 #   动机是对的：3 帧空车的底板点包围盒**长度**稳到 0.07 m
                 #   （10.83/10.90/10.87），**位置却滑 2.1~2.3 m**（换百分位代替
@@ -3813,15 +3816,24 @@ def _compute_volume_impl(baseline: Optional[EmptyBaseline], loaded: Optional[Loa
                 #   系统性偏窄：2026-09-16 实测宁A42264Z 底板量到 2.45 m，
                 #   而货的逐行跨度是 2.54~2.62 m —— 差的那 0.1~0.17 m 是真有货的。
                 #   ▲ 限幅 ±0.3 m：货的范围会被驾驶室/门架污染，不能全信。
-                lc0 = np.asarray(loaded.cloud, np.float64)
-                lift = pose_used.at(lc0[:, 0], lc0[:, 1]) if pose_used is not None else 0.0
-                sel = ((lc0[:, 1] >= by0) & (lc0[:, 1] <= by1)
-                       & ((lc0[:, 2] - baseline.bed_z_at(lc0[:, 0],
-                                                         lc0[:, 1] - float(dy)) - lift) > 0.30))
-                if int(sel.sum()) >= 200:
-                    cx = lc0[sel, 0] - yaw_k * (lc0[sel, 1] - yaw_piv)
-                    bx0 = min(bx0, max(bx0 - 0.3, float(np.percentile(cx, 0.5))))
-                    bx1 = max(bx1, min(bx1 + 0.3, float(np.percentile(cx, 99.5))))
+                if verified_floor_box is True and bed_pt.all():
+                    # 使用剪切前的物理边界。格心采样不缩小该域，载货点也不向外扩展。
+                    bx0, bx1 = float(base0.box[0]) + dx, float(base0.box[1]) + dx
+                    by0, by1 = float(base0.box[2]) + dy, float(base0.box[3]) + dy
+                else:
+                    # 未核实边界或有壁面、环境点的基线，仍按实测底板子集定域。
+                    ux = bc[:, 0] - yaw_k * (bc[:, 1] - yaw_piv)
+                    bx0, bx1 = float(ux[bed_pt].min()), float(ux[bed_pt].max())
+                    by0, by1 = float(bc[bed_pt, 1].min()), float(bc[bed_pt, 1].max())
+                    lc0 = np.asarray(loaded.cloud, np.float64)
+                    lift = pose_used.at(lc0[:, 0], lc0[:, 1]) if pose_used is not None else 0.0
+                    sel = ((lc0[:, 1] >= by0) & (lc0[:, 1] <= by1)
+                           & ((lc0[:, 2] - baseline.bed_z_at(lc0[:, 0],
+                                                             lc0[:, 1] - float(dy)) - lift) > 0.30))
+                    if int(sel.sum()) >= 200:
+                        cx = lc0[sel, 0] - yaw_k * (lc0[sel, 1] - yaw_piv)
+                        bx0 = min(bx0, max(bx0 - 0.3, float(np.percentile(cx, 0.5))))
+                        bx1 = max(bx1, min(bx1 + 0.3, float(np.percentile(cx, 99.5))))
                 # 保留原有最小有效跨度准入；确认区域后按真实交叠面积计权，
                 # 不能把边界格全算或全丢，否则非整数尺寸会随格宽、原点变化。
                 i0 = max(0, int(math.ceil((by0 - y0) / cell - 0.5)))

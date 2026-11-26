@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 from app.detect import (EmptyBaseline, InnerDomain, LoadedResult, YawDecision,
-                        _strip_grid_weights, compute_volume)
+                        _strip_grid_weights, compute_volume, compute_volume_auto)
 from tests._volume_context import conditions
 from tests.test_volume_validity import scene
 
@@ -26,6 +26,62 @@ def rectangular_scene(stray=None, shear=0.):
 
 
 class TestVolumeBoundaryArea(unittest.TestCase):
+    def test_verified_floor_box_keeps_24_m3_across_sampling_phases_and_grids(self):
+        volume_options = dict(dx=0., dy=0., yaw=0., pose=False, inner=False,
+                              fill_check=False, verified_floor_box=True)
+        for phase in (.25, .5, .75):
+            x, y = np.meshgrid((np.arange(24) + phase) * .1,
+                               (np.arange(100) + phase) * .1)
+            floor = np.c_[x.ravel(), y.ravel(), np.zeros(x.size)]
+            base = EmptyBaseline(0., (0., 2.4, 0., 10., 0., 3.), floor, len(floor))
+            loaded = LoadedResult(cloud=floor + [0., 0., 1.])
+            for cell in (.05, .1, .2, .3):
+                with self.subTest(phase=phase, cell=cell):
+                    result = compute_volume(base, loaded, voxel=cell, **volume_options)
+                    self.assertTrue(result.ok, result.text)
+                    self.assertAlmostEqual(24., result.domain.area_m2, places=10)
+                    self.assertAlmostEqual(24., result.volume_m3, places=10)
+            with self.subTest(phase=phase, entrypoint='auto'):
+                result = compute_volume_auto(base, loaded, cells=(.1, .2), **volume_options)
+                self.assertTrue(result.ok, result.text)
+                self.assertAlmostEqual(24., result.volume_m3, places=10)
+
+    def test_mixed_baseline_still_uses_observed_floor_bounds(self):
+        base, loaded, truth = rectangular_scene()
+        base.cloud = np.vstack((base.cloud, [[-3., -8., -1.7], [3., 8., -1.7]]))
+        base.n = len(base.cloud)
+        base.box = (-3., 3., -8., 8., -3.7, -1.7)
+        result = compute_volume(base, loaded, dx=0., dy=0., yaw=0., pose=False,
+                                inner=False, fill_check=False, verified_floor_box=True)
+        self.assertTrue(result.ok, result.text)
+        self.assertAlmostEqual(truth, result.domain.area_m2, places=10)
+        self.assertAlmostEqual(truth, result.volume_m3, places=10)
+
+    def test_outside_cargo_cannot_expand_verified_floor_box(self):
+        base, loaded = scene(observed_boundary=False)
+        outside = loaded.cloud[loaded.cloud[:, 0] > 1.2].copy()
+        outside[:, 0] += 1.2
+        outside[:, 2] = 2.
+        loaded.cloud = np.vstack((loaded.cloud, outside))
+        result = compute_volume(base, loaded, dx=0., dy=0., yaw=0., pose=False,
+                                inner=False, fill_check=False, verified_floor_box=True)
+        self.assertTrue(result.ok, result.text)
+        self.assertAlmostEqual(24., result.domain.area_m2, places=10)
+        self.assertAlmostEqual(24., result.volume_m3, places=10)
+
+    def test_verified_floor_box_follows_lateral_longitudinal_and_yaw_registration(self):
+        base, loaded = scene(observed_boundary=False)
+        dx, dy, slope = .12, .257, .03
+        loaded.cloud[:, 0] += dx + slope * loaded.cloud[:, 1]
+        loaded.cloud[:, 1] += dy
+        result = compute_volume(
+            base, loaded, dx=dx, dy=dy,
+            yaw=YawDecision('resolved', '解析偏航', slope, y_mid=dy, dx_m=dx, dy_m=dy),
+            pose=False, inner=False, fill_check=False, verified_floor_box=True)
+        self.assertTrue(result.ok, result.text)
+        self.assertAlmostEqual(24., result.domain.area_m2, places=10)
+        self.assertAlmostEqual(24., result.volume_m3, places=10)
+
     def test_centres_without_observed_boundary_do_not_authorize_whole_roi(self):
         # 同样的中心点，ROI放宽或网格换档都不能凭空补出四周半格的物理域。
         truth = (2.35 - .05) * (9.95 - .05)
